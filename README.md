@@ -27,7 +27,7 @@ A simple, automated bash script to install **Frappe Framework** and **ERPNext v1
 
 ```bash
 # Download the script
-wget https://github.com/omarrtarek29/frappe-erpnext_installer/frappe_installer.sh
+wget https://github.com/omarrtarek29/frappe-erpnext_installer/blob/main/frappe_installer.sh
 
 # Or if you have it locally, just navigate to its directory
 cd /path/to/script
@@ -250,6 +250,27 @@ sudo tail -f /var/log/supervisor/supervisord.log
    ```bash
    sudo ufw status
    ```
+
+### Supervisor Issues
+
+If you encounter supervisor-related issues or services are not starting:
+
+```bash
+cd /home/frappe/frappe-bench
+sudo bench setup production [$FRAPPE_USER]
+```
+
+This will reconfigure supervisor and nginx for production.
+
+### SSL Certificate Issues
+
+If SSL certificate installation failed or you need to reinstall it:
+
+```bash
+sudo certbot --nginx -d yourdomain.com
+```
+
+Make sure your domain's DNS A record is pointing to your server's IP address before running this command.
 
 ### MariaDB Connection Issues
 
