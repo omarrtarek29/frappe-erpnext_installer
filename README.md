@@ -36,13 +36,13 @@ cd /path/to/script
 ### Step 2: Make it Executable
 
 ```bash
-chmod +x frappe-installer.sh
+chmod +x frappe_installer.sh
 ```
 
 ### Step 3: Run the Installer
 
 ```bash
-sudo ./frappe-installer.sh
+sudo ./frappe_installer.sh
 ```
 
 ## Installation Process
