@@ -87,8 +87,10 @@ fi
 
 ###########################################
 echo "=== Install Yarn ==="
-cd /tmp 2>/dev/null || true
-sudo npm install -g yarn
+if ! command -v sudo npm &>/dev/null; then
+    sudo npm install -g npm
+    sudo npm install -g yarn
+fi
 
 ###########################################
 echo "=== Install uv (required by Bench) ==="
@@ -273,8 +275,12 @@ EOF
 ###########################################
 echo ""
 echo "=== Setup Firewall ==="
-sudo ufw allow 22,80,443,8000/tcp
-sudo ufw --force enable
+if command -v ufw &>/dev/null; then
+    sudo ufw allow 22,80,443,8000/tcp
+    sudo ufw --force enable
+else
+    echo "ufw not installed, skipping firewall setup"
+fi
 
 ###########################################
 if [ ! -z "$DOMAIN" ]; then
