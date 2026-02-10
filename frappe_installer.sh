@@ -4,14 +4,26 @@ set -e
 ###########################################
 # USER INPUT
 ###########################################
+read -p "Enter Frappe version (15 or 16): " FRAPPE_VER
+if [ "$FRAPPE_VER" != "15" ] && [ "$FRAPPE_VER" != "16" ]; then
+    echo "Invalid version. Enter 15 or 16."
+    exit 1
+fi
+
 read -p "Enter frappe system user: " FRAPPE_USER
-read -p "Enter bench path (example: /home/${FRAPPE_USER}/frappe-bench): " BENCH_PATH
+read -p "Enter bench name (example: frappe-bench): " BENCH_NAME
 read -p "Enter site name: " SITE_NAME
 read -p "Enter admin password for Frappe site: " ADMIN_PASS
 read -p "Enter domain (leave empty to skip SSL): " DOMAIN
 
-PYTHON_MINOR="3.14"
-FRAPPE_BRANCH="version-16"
+
+if [ "$FRAPPE_VER" = "15" ]; then
+    PYTHON_MINOR="3.10"
+    FRAPPE_BRANCH="version-15"
+else
+    PYTHON_MINOR="3.14"
+    FRAPPE_BRANCH="version-16"
+fi
 
 ###########################################
 echo "=== Update System ==="
@@ -20,9 +32,12 @@ sudo apt-get upgrade -y
 
 ###########################################
 echo "=== Create frappe user if missing ==="
-if ! id "$FRAPPE_USER" &>/dev/null; then
-    sudo adduser --disabled-password --gecos "" $FRAPPE_USER
-    sudo usermod -aG sudo $FRAPPE_USER
+if id "$FRAPPE_USER" &>/dev/null; then
+    echo "User '$FRAPPE_USER' already exists, skipping creation."
+else
+    sudo adduser --disabled-password --gecos "" "$FRAPPE_USER"
+    sudo usermod -aG sudo "$FRAPPE_USER"
+    echo "User '$FRAPPE_USER' created."
 fi
 
 ###########################################
@@ -36,7 +51,7 @@ wkhtmltopdf xvfb libfontconfig \
 libmysqlclient-dev libpq-dev \
 libffi-dev libssl-dev \
 zlib1g-dev libjpeg-dev \
-pkg-config python3-pip pipx
+pkg-config python3-pip python3-setuptools pipx
 
 ###########################################
 echo "=== Install Python ${PYTHON_MINOR} ==="
@@ -48,30 +63,44 @@ if ! command -v python${PYTHON_MINOR} &>/dev/null; then
     python${PYTHON_MINOR}-dev \
     python${PYTHON_MINOR}-venv
 fi
+
+if [ "$FRAPPE_VER" = "15" ]; then
+    sudo apt-get install -y python3.10-setuptools 2>/dev/null || true
+fi
 PYTHON_BIN=$(which python${PYTHON_MINOR})
 echo "Using Python: $PYTHON_BIN"
 
+cd /tmp 2>/dev/null || true
+
 ###########################################
 echo "=== Install Node 24 ==="
-if ! command -v node &>/dev/null || [ "$(node -v | cut -d. -f1 | tr -d v)" -lt 24 ]; then
+NEED_NODE=0
+if ! command -v node &>/dev/null; then
+    NEED_NODE=1
+elif [ "$(node -v 2>/dev/null | cut -d. -f1 | tr -d v)" -lt 24 ] 2>/dev/null; then
+    NEED_NODE=1
+fi
+if [ "$NEED_NODE" = "1" ]; then
     curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
     sudo apt-get install -y nodejs
 fi
 
 ###########################################
 echo "=== Install Yarn ==="
+cd /tmp 2>/dev/null || true
 sudo npm install -g yarn
 
 ###########################################
 echo "=== Install uv (required by Bench) ==="
 if ! command -v uv &>/dev/null; then
     curl -LsSf https://astral.sh/uv/install.sh | sh
-    # Add to global path
-    if [ -f /root/.local/bin/uv ]; then
-        sudo ln -sf /root/.local/bin/uv /usr/local/bin/uv
+    if [ -f "$HOME/.local/bin/uv" ]; then
+        sudo ln -sf "$HOME/.local/bin/uv" /usr/local/bin/uv 2>/dev/null || true
     fi
-    # Also install for frappe user
-    sudo -u $FRAPPE_USER bash -c "curl -LsSf https://astral.sh/uv/install.sh | sh"
+    if [ -f /root/.local/bin/uv ]; then
+        sudo ln -sf /root/.local/bin/uv /usr/local/bin/uv 2>/dev/null || true
+    fi
+    sudo -u "$FRAPPE_USER" bash -c "curl -LsSf https://astral.sh/uv/install.sh | sh"
 fi
 
 ###########################################
@@ -79,14 +108,12 @@ echo ""
 echo "=== MariaDB Setup ==="
 echo ""
 
-# Check if MariaDB root password is already set
 MYSQL_ROOT_PASS=""
 PASSWORD_SET=false
 
 read -p "Do you already have a MariaDB root password set? (y/n): " HAS_PASSWORD
 
 if [ "$HAS_PASSWORD" = "y" ] || [ "$HAS_PASSWORD" = "Y" ]; then
-    # User has existing password
     while true; do
         read -s -p "Enter your existing MariaDB root password: " MYSQL_ROOT_PASS
         echo
@@ -105,7 +132,6 @@ if [ "$HAS_PASSWORD" = "y" ] || [ "$HAS_PASSWORD" = "Y" ]; then
         fi
     done
 else
-    # Need to set new password
     echo ""
     echo "We will now secure your MariaDB installation."
     echo "You will be prompted to:"
@@ -119,10 +145,8 @@ else
     echo ""
     read -p "Press ENTER to continue..."
     
-    # Run mysql_secure_installation interactively
     sudo mysql_secure_installation
     
-    # Now ask for the password they just set
     while true; do
         echo ""
         read -s -p "Enter the MariaDB root password you just set: " MYSQL_ROOT_PASS
@@ -152,7 +176,6 @@ fi
 echo ""
 echo "=== Configure MariaDB ==="
 
-# Create config file
 sudo tee /etc/mysql/mariadb.conf.d/99-frappe.cnf > /dev/null <<'EOF'
 [mysqld]
 character-set-server = utf8mb4
@@ -162,7 +185,6 @@ collation-server = utf8mb4_unicode_ci
 default-character-set = utf8mb4
 EOF
 
-# Restart MariaDB
 echo "Restarting MariaDB with new configuration..."
 if sudo systemctl restart mariadb; then
     echo "✓ MariaDB restarted successfully"
@@ -174,7 +196,6 @@ else
     echo "MariaDB restored, continuing without custom character set config"
 fi
 
-# Set global variables
 sudo mysql -uroot -p"$MYSQL_ROOT_PASS" -e "SET GLOBAL character_set_server='utf8mb4';" 2>/dev/null || true
 sudo mysql -uroot -p"$MYSQL_ROOT_PASS" -e "SET GLOBAL collation_server='utf8mb4_unicode_ci';" 2>/dev/null || true
 
@@ -207,14 +228,20 @@ export PATH=/home/$FRAPPE_USER/.local/bin:\$PATH
 
 cd /home/$FRAPPE_USER
 
-if [ ! -d "$BENCH_PATH" ]; then
-    echo "Initializing new bench at $BENCH_PATH..."
-    bench init "$BENCH_PATH" --python "$PYTHON_BIN" --frappe-branch $FRAPPE_BRANCH
+if [ ! -d "/home/$FRAPPE_USER/$BENCH_NAME" ]; then
+    echo "Initializing new bench at /home/$FRAPPE_USER/$BENCH_NAME..."
+    bench init "/home/$FRAPPE_USER/$BENCH_NAME" --python "$PYTHON_BIN" --frappe-branch $FRAPPE_BRANCH
 else
-    echo "Bench already exists at $BENCH_PATH"
+    echo "Bench already exists at /home/$FRAPPE_USER/$BENCH_NAME"
 fi
 
-cd "$BENCH_PATH"
+cd "/home/$FRAPPE_USER/$BENCH_NAME"
+
+# v15 requires payments app before ERPNext
+if [ "$FRAPPE_VER" = "15" ] && [ ! -d "apps/payments" ]; then
+    echo "Getting payments app..."
+    bench get-app payments --branch $FRAPPE_BRANCH
+fi
 
 # Get ERPNext app
 if [ ! -d "apps/erpnext" ]; then
@@ -224,9 +251,17 @@ else
     echo "ERPNext app already exists"
 fi
 
+# v15: force-install setuptools in bench venv (dropbox needs pkg_resources)
+if [ "$FRAPPE_VER" = "15" ]; then
+    echo "Installing setuptools<75 in bench venv (pkg_resources for v15)..."
+    ./env/bin/python -m ensurepip --upgrade 2>/dev/null || true
+    ./env/bin/python -m pip install "setuptools>=58,<75"
+    ./env/bin/python -c "import pkg_resources; print('pkg_resources OK')" || { echo "ERROR: pkg_resources still missing"; exit 1; }
+fi
+
 # Create site if it doesn't exist
 if [ ! -d "sites/$SITE_NAME" ]; then
-    echo "Creating new site: $SITE_NAME (without ERPNext)..."
+    echo "Creating new site: $SITE_NAME ..."
     bench new-site $SITE_NAME \
     --admin-password "$ADMIN_PASS" \
     --mariadb-root-password "$MYSQL_ROOT_PASS"
@@ -242,14 +277,12 @@ sudo ufw allow 22,80,443,8000/tcp
 sudo ufw --force enable
 
 ###########################################
-# Check if we need to setup production or development
 if [ ! -z "$DOMAIN" ]; then
     echo ""
     echo "=== Setup Production ==="
-    cd "$BENCH_PATH"
+    cd "/home/$FRAPPE_USER/$BENCH_NAME"
     sudo -E env "PATH=/home/$FRAPPE_USER/.local/bin:$PATH" bench setup production $FRAPPE_USER
 
-    # Restart services
     sleep 3
     sudo supervisorctl reread || true
     sudo supervisorctl update || true
@@ -277,23 +310,21 @@ if [ ! -z "$DOMAIN" ]; then
     echo "=== Install ERPNext ==="
     sudo -u $FRAPPE_USER -H bash <<EOF
 export PATH=/home/$FRAPPE_USER/.local/bin:\$PATH
-cd "$BENCH_PATH"
+cd "/home/$FRAPPE_USER/$BENCH_NAME"
 echo "Installing ERPNext on site..."
 bench --site $SITE_NAME install-app erpnext
 bench --site $SITE_NAME enable-scheduler
 bench --site $SITE_NAME set-maintenance-mode off
 EOF
 
-    # Restart all services after ERPNext installation
     sudo supervisorctl restart all || true
 
 else
-    # Development mode - start bench and install ERPNext
     echo ""
     echo "=== Starting Bench in Background ==="
     sudo -u $FRAPPE_USER -H bash <<EOF
 export PATH=/home/$FRAPPE_USER/.local/bin:\$PATH
-cd "$BENCH_PATH"
+cd "/home/$FRAPPE_USER/$BENCH_NAME"
 
 # Start bench in background
 nohup bench start > bench_start.log 2>&1 &
@@ -313,7 +344,7 @@ bench --site $SITE_NAME set-maintenance-mode off
 echo "ERPNext installation complete!"
 echo "Bench is running in background (PID: \$BENCH_PID)"
 echo "To stop bench: kill \$BENCH_PID"
-echo "To view logs: tail -f $BENCH_PATH/bench_start.log"
+echo "To view logs: tail -f /home/$FRAPPE_USER/$BENCH_NAME/bench_start.log"
 EOF
 fi
 
@@ -321,7 +352,8 @@ echo ""
 echo "======================================="
 echo " FRAPPE/ERPNEXT INSTALLATION COMPLETE "
 echo "======================================="
-echo " Bench Path: $BENCH_PATH"
+echo " Version   : Frappe $FRAPPE_VER ($FRAPPE_BRANCH)"
+echo " Bench Path: /home/$FRAPPE_USER/$BENCH_NAME"
 echo " Site Name : $SITE_NAME"
 echo " Python    : $PYTHON_BIN"
 echo " Access URL: http://$(hostname -I | awk '{print $1}')"
@@ -331,7 +363,7 @@ fi
 echo "======================================="
 echo ""
 echo "Useful commands:"
-echo "  cd $BENCH_PATH"
+echo "  cd /home/$FRAPPE_USER/$BENCH_NAME"
 echo "  bench start              # Start in development mode"
 echo "  bench restart            # Restart in production mode"
 echo "  sudo supervisorctl status # Check service status"
