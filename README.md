@@ -1,12 +1,12 @@
-# Frappe/ERPNext v16 Automated Installer
+# Frappe/ERPNext Automated Installer (v15 & v16)
 
-A simple, automated bash script to install **Frappe Framework** and **ERPNext v16** on Ubuntu systems with minimal manual intervention.
+A simple, automated bash script to install **Frappe Framework** and **ERPNext** on Ubuntu systems with minimal manual intervention. Supports **Frappe v15** and **v16**; you choose the version at the start.
 
 ## Features
 
+- ✅ **Frappe v15 or v16** — choose version at install time (Python 3.10 for v15, Python 3.14 for v16)
 - ✅ Automated installation of all dependencies
-- ✅ Python 3.14 support
-- ✅ Node.js 24 installation
+- ✅ Node.js 24 and same bench stack for both versions (uv, pipx, latest bench)
 - ✅ MariaDB setup with interactive or existing password support
 - ✅ Bench initialization and ERPNext app installation
 - ✅ Production-ready setup with Nginx and Supervisor
@@ -49,7 +49,15 @@ sudo ./frappe_installer.sh
 
 When you run the script, you'll be prompted for the following information:
 
-### 1. **Frappe System User**
+### 1. **Frappe Version (15 or 16)**
+```
+Enter Frappe version (15 or 16): 15
+```
+- **15** — Frappe/ERPNext v15 (Python 3.10, payments app + ERPNext)
+- **16** — Frappe/ERPNext v16 (Python 3.14, ERPNext only)
+- Same stack for both: Node 24, uv, pipx, latest bench, same MariaDB config
+
+### 2. **Frappe System User**
 ```
 Enter frappe system user: frappe
 ```
@@ -57,15 +65,15 @@ Enter frappe system user: frappe
 - Default recommendation: `frappe`
 - The script will create this user if it doesn't exist
 
-### 2. **Bench Path**
+### 3. **Bench Name**
 ```
-Enter bench path (example: /home/frappe/frappe-bench): /home/frappe/frappe-bench
+Enter bench name (example: frappe-bench): frappe-bench
 ```
-- Full path where the Frappe bench will be installed
-- Format: `/home/[username]/frappe-bench`
-- Example: `/home/frappe/frappe-bench`
+- Name of the bench directory
+- The bench will be created at: `/home/[frappe-user]/[bench-name]`
+- Example: `frappe-bench` → `/home/frappe/frappe-bench`
 
-### 3. **Site Name**
+### 4. **Site Name**
 ```
 Enter site name: mysite.local
 ```
@@ -73,7 +81,7 @@ Enter site name: mysite.local
 - For local/development: use `.local` domain (e.g., `mysite.local`)
 - For production: use your actual domain (e.g., `erp.mycompany.com`)
 
-### 4. **Admin Password**
+### 5. **Admin Password**
 ```
 Enter admin password for Frappe site: 
 ```
@@ -81,7 +89,7 @@ Enter admin password for Frappe site:
 - This is what you'll use to log in after installation
 - Choose a strong password
 
-### 5. **Domain (Optional)**
+### 6. **Domain (Optional)**
 ```
 Enter domain (leave empty to skip SSL): 
 ```
@@ -133,17 +141,22 @@ The script automatically installs and configures:
 - Redis Server
 - wkhtmltopdf (for PDF generation)
 - Build essentials and development libraries
+- python3-pip, python3-setuptools, pipx
 
-### Programming Languages & Tools
-- **Python 3.14** with development headers and venv
-- **Node.js 24** (latest LTS)
-- **Yarn** package manager
-- **uv** (fast Python package installer)
+### Programming Languages & Tools (by version)
+| Component   | v15              | v16              |
+|------------|------------------|------------------|
+| Python     | 3.10 (deadsnakes)| 3.14 (deadsnakes)|
+| Node.js    | 24               | 24               |
+| Yarn       | ✓                | ✓                |
+| uv         | ✓                | ✓                |
+| Bench      | pipx (latest)    | pipx (latest)    |
 
 ### Frappe Stack
 - **Frappe Bench** (CLI tool for managing Frappe applications)
-- **Frappe Framework v16**
-- **ERPNext v16** (full ERP application)
+- **Frappe Framework v15 or v16**
+- **ERPNext v15 or v16** (full ERP application)
+- **Frappe Payments for v15**
 
 ### Production Services
 - **Nginx** (web server and reverse proxy)
@@ -161,9 +174,10 @@ After successful installation, you'll see:
 =======================================
  FRAPPE/ERPNEXT INSTALLATION COMPLETE 
 =======================================
+ Version   : Frappe 15 (version-15) or Frappe 16 (version-16)
  Bench Path: /home/frappe/frappe-bench
  Site Name : mysite.local
- Python    : /usr/bin/python3.14
+ Python    : /usr/bin/python3.10 (v15) or /usr/bin/python3.14 (v16)
  Access URL: http://YOUR_SERVER_IP
  Domain    : https://yourdomain.com (if configured)
 =======================================
