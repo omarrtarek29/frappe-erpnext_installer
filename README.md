@@ -26,8 +26,8 @@ A simple, automated bash script to install **Frappe Framework** and **ERPNext** 
 ### Step 1: Download the Script
 
 ```bash
-# Download the script
-curl -L -o frappe_installer.sh https://raw.githubusercontent.com/omarrtarek29/frappe-erpnext_installer/main/frappe_installer.sh
+# Clone the repository
+git clone https://github.com/omarrtarek29/frappe-erpnext_installer/
 
 # Or if you have it locally, just navigate to its directory
 cd /path/to/script
@@ -42,7 +42,7 @@ chmod +x frappe_installer.sh
 ### Step 3: Run the Installer
 
 ```bash
-sudo ./frappe_installer.sh
+./frappe_installer.sh
 ```
 
 ## Installation Process
