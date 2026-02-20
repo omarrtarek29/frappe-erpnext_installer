@@ -39,11 +39,35 @@ install_system_packages() {
 		}
 	fi
 
+	_install_uv
 	_install_python
 	_install_nodejs
 	_install_yarn
 	_install_redis
 	_install_mariadb
+}
+
+_install_uv() {
+	log_info "Installing uv (Python package installer for bench)..."
+	if command_exists uv; then
+		log_success "uv already installed: $(uv --version 2>/dev/null || true)"
+		return
+	fi
+	local uv_install_sh="/tmp/uv-install.sh"
+	curl -LsSf https://astral.sh/uv/install.sh -o "$uv_install_sh" || {
+		log_warn "uv install script download failed; bench may fall back to pip"
+		rm -f "$uv_install_sh"
+		return
+	}
+	sudo env UV_INSTALL_DIR=/usr/local/bin sh "$uv_install_sh" || {
+		log_warn "uv installation failed; bench get-app may fail with 'uv not found'"
+	}
+	rm -f "$uv_install_sh"
+	if command_exists uv; then
+		log_success "uv installed: $(uv --version 2>/dev/null || true)"
+	else
+		log_warn "uv not in PATH; ensure /usr/local/bin is in PATH for $FRAPPE_USER"
+	fi
 }
 
 _install_python() {
