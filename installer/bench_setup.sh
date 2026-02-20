@@ -6,7 +6,7 @@ install_bench_and_site() {
 
 	sudo -u "$FRAPPE_USER" -H bash <<'BENCHINSTALL'
 set -e
-export PATH="$HOME/.local/bin:$PATH"
+export PATH="/usr/local/bin:$HOME/.local/bin:$PATH"
 pipx ensurepath 2>/dev/null || true
 if ! command -v bench &>/dev/null; then
     pipx install frappe-bench || pip3 install --user frappe-bench
@@ -20,7 +20,7 @@ BENCHINSTALL
 
 	sudo -u "$FRAPPE_USER" -H bash <<BENCHINIT
 set -e
-export PATH="\$HOME/.local/bin:\$PATH"
+export PATH="/usr/local/bin:\$HOME/.local/bin:\$PATH"
 
 cd "$FRAPPE_HOME"
 

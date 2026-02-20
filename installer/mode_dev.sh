@@ -6,7 +6,7 @@ setup_dev_mode() {
 
 	sudo -u "$FRAPPE_USER" -H bash <<DEVMODE
 set -e
-export PATH="\$HOME/.local/bin:\$PATH"
+export PATH="/usr/local/bin:\$HOME/.local/bin:\$PATH"
 
 cd "$BENCH_PATH"
 
