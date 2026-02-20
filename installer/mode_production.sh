@@ -29,7 +29,7 @@ setup_production() {
 		log_info "Installing ERPNext on site..."
 		sudo -u "$FRAPPE_USER" -H bash <<ERPINSTALL
 set -e
-export PATH="\$HOME/.local/bin:\$PATH"
+export PATH="/usr/local/bin:\$HOME/.local/bin:\$PATH"
 cd "$BENCH_PATH"
 bench --site "$SITE_NAME" install-app erpnext
 
