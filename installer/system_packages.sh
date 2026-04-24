@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# System update, user creation, and package installation (Python, Node, Yarn, Redis, MariaDB)
 
 install_system_packages() {
 	log_info "Updating system packages..."

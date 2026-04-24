@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Print installation completion summary
 
 print_summary() {
 	SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "localhost")
@@ -13,6 +12,7 @@ print_summary() {
 	echo "  Python     : $PYTHON_BIN"
 	echo "  Node.js    : $(node -v)"
 	echo "  Bench      : $BENCH_PATH"
+	echo "  Bench bin  : /usr/local/bin/bench (global)"
 	echo "  Site       : $SITE_NAME"
 	echo ""
 	if [ -n "$DOMAIN" ]; then
@@ -24,13 +24,6 @@ print_summary() {
 	echo "  Login:"
 	echo "    Username : Administrator"
 	echo "    Password : $ADMIN_PASS"
-	echo ""
-	echo "==========================================="
-	echo ""
-	echo "IMPORTANT: Run this to enable bench command:"
-	echo "  source ~/.bashrc"
-	echo ""
-	echo "Or log out and log back in."
 	echo ""
 	echo "==========================================="
 	echo ""

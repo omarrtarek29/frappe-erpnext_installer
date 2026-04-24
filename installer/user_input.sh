@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Collect user input and set version-specific variables
 
 collect_user_input() {
 	echo ""

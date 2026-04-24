@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# UFW firewall configuration
 
 configure_firewall() {
 	if command_exists ufw; then

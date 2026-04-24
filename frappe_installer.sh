@@ -1,8 +1,4 @@
 #!/usr/bin/env bash
-###########################################
-# Frappe/ERPNext Universal Installer
-# Supports: Ubuntu 20.04, 22.04, 24.04+
-###########################################
 
 set -e
 export DEBIAN_FRONTEND=noninteractive
@@ -10,7 +6,6 @@ export DEBIAN_FRONTEND=noninteractive
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALLER_DIR="$SCRIPT_DIR/installer"
 
-# Load modules
 source "$INSTALLER_DIR/common.sh"
 source "$INSTALLER_DIR/system_checks.sh"
 source "$INSTALLER_DIR/user_input.sh"
@@ -25,6 +20,9 @@ source "$INSTALLER_DIR/summary.sh"
 main() {
 	system_checks
 	collect_user_input
+	keep_sudo_alive
+	trap stop_sudo_keepalive EXIT
+
 	install_system_packages
 	configure_mariadb
 	install_bench_and_site

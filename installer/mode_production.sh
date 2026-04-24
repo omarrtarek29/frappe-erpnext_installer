@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
-# Production: setup production, ensure services, optionally install ERPNext, SSL
 
 setup_production() {
 	log_info "Setting up production..."
 
 	run_as_frappe_user "$FRAPPE_USER" "cd '$BENCH_PATH' && bench --site '$SITE_NAME' enable-scheduler"
 	run_as_frappe_user "$FRAPPE_USER" "cd '$BENCH_PATH' && bench --site '$SITE_NAME' set-maintenance-mode off"
-	
+
 	run_as_frappe_user "$FRAPPE_USER" "cd '$BENCH_PATH' && bench setup nginx --yes"
-	sudo -u "$FRAPPE_USER" -H bash -c "$(get_bench_path_export); cd '$BENCH_PATH' && sudo bench setup production '$FRAPPE_USER' --yes"
+
+	log_info "Configuring production (nginx + supervisor)..."
+	sudo -n bash -c "cd '$BENCH_PATH' && /usr/local/bin/bench setup production '$FRAPPE_USER' --yes"
 
 	local redis_port
 	redis_port=$(get_redis_queue_port "$BENCH_PATH")
@@ -19,7 +20,7 @@ setup_production() {
 		run_as_frappe_user "$FRAPPE_USER" "cd '$BENCH_PATH' && bench --site '$SITE_NAME' install-app erpnext"
 		log_success "ERPNext installed"
 	else
-		log_info "Skipping ERPNext installation (user chose not to install)."
+		log_info "Skipping ERPNext installation"
 	fi
 
 	log_info "Installing SSL certificate..."

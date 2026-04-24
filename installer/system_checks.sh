@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# System compatibility checks (root, RAM)
 
 system_checks() {
 	log_info "Checking system compatibility..."

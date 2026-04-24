@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# MariaDB root password and Frappe-specific configuration
 
 configure_mariadb() {
 	log_info "Configuring MariaDB..."

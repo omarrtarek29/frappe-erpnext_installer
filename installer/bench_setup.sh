@@ -1,43 +1,33 @@
 #!/usr/bin/env bash
-# Install bench CLI, initialize bench, get ERPNext, create site
 
 install_bench_and_site() {
-	log_info "Installing Frappe Bench..."
-
-	setup_user_profile "$FRAPPE_USER"
-
-	sudo -u "$FRAPPE_USER" -H bash <<'BENCHINSTALL'
-set -e
-export PATH="/usr/local/bin:$HOME/.local/bin:$PATH"
-pipx ensurepath 2>/dev/null || true
-if ! command -v bench &>/dev/null; then
-    pipx install frappe-bench || pip3 install --user frappe-bench
-fi
-bench --version
-BENCHINSTALL
-
-	log_success "Bench installed"
+	install_bench_globally
 
 	log_info "Initializing Bench..."
 
+	local site_flags=""
+	if [ "${FORCE_SITE:-no}" = "yes" ]; then
+		site_flags="--force"
+	fi
+
 	sudo -u "$FRAPPE_USER" -H bash <<BENCHINIT
 set -e
-export PATH="/usr/local/bin:\$HOME/.local/bin:\$PATH"
+export PATH="/usr/local/bin:/usr/bin:/bin"
 
 cd "$FRAPPE_HOME"
 
 if [ ! -d "$BENCH_PATH" ]; then
-    bench init "$BENCH_PATH" \
-        --python "$PYTHON_BIN" \
-        --frappe-branch "$FRAPPE_BRANCH"
+    bench init "$BENCH_PATH" --python "$PYTHON_BIN" --frappe-branch "$FRAPPE_BRANCH"
 else
-    echo "Bench already exists"
+    echo "Bench already exists at $BENCH_PATH"
 fi
 
 cd "$BENCH_PATH"
 
 if [ ! -d "apps/erpnext" ]; then
     bench get-app erpnext --branch "$FRAPPE_BRANCH"
+else
+    echo "ERPNext app already present"
 fi
 
 if [ "$FRAPPE_VER" = "15" ]; then
@@ -45,14 +35,11 @@ if [ "$FRAPPE_VER" = "15" ]; then
     ./env/bin/pip install "setuptools>=58,<75"
 fi
 
-if [ ! -d "sites/$SITE_NAME" ]; then
+if [ ! -d "sites/$SITE_NAME" ] || [ "${FORCE_SITE:-no}" = "yes" ]; then
     if [ -n "$MYSQL_ROOT_PASS" ]; then
-        bench new-site "$SITE_NAME" \
-            --admin-password "$ADMIN_PASS" \
-            --mariadb-root-password "$MYSQL_ROOT_PASS"
+        bench new-site "$SITE_NAME" $site_flags --admin-password "$ADMIN_PASS" --mariadb-root-password "$MYSQL_ROOT_PASS"
     else
-        bench new-site "$SITE_NAME" \
-            --admin-password "$ADMIN_PASS"
+        bench new-site "$SITE_NAME" $site_flags --admin-password "$ADMIN_PASS"
     fi
 fi
 
