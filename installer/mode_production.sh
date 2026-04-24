@@ -3,6 +3,11 @@
 setup_production() {
 	log_info "Setting up production..."
 
+	ensure_bench_global || {
+		log_error "Cannot proceed - bench is not accessible system-wide"
+		exit 1
+	}
+
 	run_as_frappe_user "$FRAPPE_USER" "cd '$BENCH_PATH' && bench --site '$SITE_NAME' enable-scheduler"
 	run_as_frappe_user "$FRAPPE_USER" "cd '$BENCH_PATH' && bench --site '$SITE_NAME' set-maintenance-mode off"
 

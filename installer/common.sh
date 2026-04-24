@@ -31,37 +31,63 @@ safe_apt_install() {
 }
 
 install_bench_globally() {
-	log_info "Installing Frappe Bench globally to /usr/local/bin..."
+	log_info "Installing Frappe Bench ..."
 
-	if [ -f "/home/$FRAPPE_USER/.local/bin/bench" ]; then
-		log_info "Removing user-local bench installation..."
-		sudo -u "$FRAPPE_USER" -H bash -c 'pipx uninstall frappe-bench 2>/dev/null || pip3 uninstall -y frappe-bench 2>/dev/null || true'
-		sudo rm -f "/home/$FRAPPE_USER/.local/bin/bench"
-	fi
-
-	if [ -L /usr/local/bin/bench ] || [ -f /usr/local/bin/bench ]; then
+	if [ -L /usr/local/bin/bench ] || [ -x /usr/local/bin/bench ]; then
 		if /usr/local/bin/bench --version &>/dev/null; then
-			log_success "bench already installed globally: $(/usr/local/bin/bench --version)"
+			log_success "bench already at /usr/local/bin/bench: $(/usr/local/bin/bench --version)"
 			return 0
 		fi
 		sudo rm -f /usr/local/bin/bench
 	fi
 
-	if ! command_exists pipx; then
-		sudo apt-get install -y pipx || sudo pip3 install --break-system-packages pipx
+	local user_bench=""
+	if [ -x "/home/$FRAPPE_USER/.local/bin/bench" ]; then
+		user_bench="/home/$FRAPPE_USER/.local/bin/bench"
+		log_info "Found existing user-local bench at $user_bench"
 	fi
 
-	sudo PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin pipx install frappe-bench || {
-		log_warn "pipx install failed, falling back to pip"
-		sudo pip3 install --break-system-packages frappe-bench
-	}
+	if [ -z "$user_bench" ]; then
+		if ! command_exists pipx; then
+			sudo apt-get install -y pipx 2>/dev/null || sudo pip3 install --break-system-packages pipx
+		fi
 
-	if ! /usr/local/bin/bench --version &>/dev/null; then
-		log_error "Global bench installation failed"
+		log_info "Installing frappe-bench via pipx (system-wide to /opt/pipx)..."
+		sudo PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin pipx install frappe-bench 2>/dev/null || {
+			log_warn "System pipx install failed, installing as $FRAPPE_USER"
+			sudo -u "$FRAPPE_USER" -H bash -c 'export PATH=$HOME/.local/bin:$PATH; pipx install frappe-bench'
+			user_bench="/home/$FRAPPE_USER/.local/bin/bench"
+		}
+	fi
+
+	if [ ! -L /usr/local/bin/bench ] && [ ! -x /usr/local/bin/bench ]; then
+		if [ -n "$user_bench" ] && [ -x "$user_bench" ]; then
+			log_info "Linking $user_bench → /usr/local/bin/bench"
+			sudo ln -sf "$user_bench" /usr/local/bin/bench
+		fi
+	fi
+
+	if ! /usr/local/bin/bench --version &>/dev/null && ! sudo /usr/local/bin/bench --version &>/dev/null; then
+		log_error "bench global setup failed - /usr/local/bin/bench is not working"
 		return 1
 	fi
 
-	log_success "bench installed globally: $(/usr/local/bin/bench --version)"
+	log_success "bench available at /usr/local/bin/bench (works with sudo): $(/usr/local/bin/bench --version 2>/dev/null || sudo /usr/local/bin/bench --version)"
+}
+
+ensure_bench_global() {
+	if [ -x /usr/local/bin/bench ] && /usr/local/bin/bench --version &>/dev/null; then
+		return 0
+	fi
+	local user_bench
+	user_bench=$(sudo -u "$FRAPPE_USER" -H bash -c 'export PATH=$HOME/.local/bin:/usr/local/bin:$PATH; command -v bench' 2>/dev/null || echo "")
+	if [ -n "$user_bench" ] && [ -x "$user_bench" ]; then
+		log_info "Creating /usr/local/bin/bench → $user_bench"
+		sudo ln -sf "$user_bench" /usr/local/bin/bench
+		return 0
+	fi
+	log_error "bench binary not found anywhere"
+	return 1
 }
 
 run_as_frappe_user() {

@@ -26,6 +26,7 @@ main() {
 	install_system_packages
 	configure_mariadb
 	install_bench_and_site
+	ensure_bench_global
 	ask_install_erpnext
 
 	if [ -n "$DOMAIN" ]; then
