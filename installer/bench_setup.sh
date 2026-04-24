@@ -4,6 +4,8 @@
 install_bench_and_site() {
 	log_info "Installing Frappe Bench..."
 
+	setup_user_profile "$FRAPPE_USER"
+
 	sudo -u "$FRAPPE_USER" -H bash <<'BENCHINSTALL'
 set -e
 export PATH="/usr/local/bin:$HOME/.local/bin:$PATH"

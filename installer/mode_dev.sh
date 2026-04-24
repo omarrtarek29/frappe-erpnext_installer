@@ -4,37 +4,24 @@
 setup_dev_mode() {
 	log_info "Starting development mode..."
 
-	sudo -u "$FRAPPE_USER" -H bash <<DEVMODE
-set -e
-export PATH="/usr/local/bin:\$HOME/.local/bin:\$PATH"
+	run_as_frappe_user "$FRAPPE_USER" "cd '$BENCH_PATH' && nohup bench start > bench.log 2>&1 &"
+	log_info "Bench starting in background..."
+	
+	sleep 5
 
-cd "$BENCH_PATH"
+	local redis_port
+	redis_port=$(get_redis_queue_port "$BENCH_PATH")
+	wait_for_redis "$redis_port" 15 || log_warn "Redis may not be ready - continuing anyway"
 
-nohup bench start > bench.log 2>&1 &
-BENCH_PID=\$!
-echo "Bench started with PID: \$BENCH_PID"
-
-sleep 10
-
-for i in {1..30}; do
-    if redis-cli -p 11001 ping &>/dev/null; then
-        echo "Redis Queue is ready"
-        break
-    fi
-    echo "Waiting for Redis Queue... (\$i/30)"
-    sleep 2
-done
-
-if [ "${INSTALL_ERPNEXT:-yes}" = "yes" ]; then
-    echo "Installing ERPNext on site..."
-    bench --site "$SITE_NAME" install-app erpnext
-    bench --site "$SITE_NAME" enable-scheduler
-    bench --site "$SITE_NAME" set-maintenance-mode off
-    echo "ERPNext installation complete"
-else
-    echo "Skipping ERPNext installation (user chose not to install)."
-fi
-DEVMODE
+	if [ "${INSTALL_ERPNEXT:-yes}" = "yes" ]; then
+		log_info "Installing ERPNext on site..."
+		run_as_frappe_user "$FRAPPE_USER" "cd '$BENCH_PATH' && bench --site '$SITE_NAME' install-app erpnext"
+		run_as_frappe_user "$FRAPPE_USER" "cd '$BENCH_PATH' && bench --site '$SITE_NAME' enable-scheduler"
+		run_as_frappe_user "$FRAPPE_USER" "cd '$BENCH_PATH' && bench --site '$SITE_NAME' set-maintenance-mode off"
+		log_success "ERPNext installation complete"
+	else
+		log_info "Skipping ERPNext installation (user chose not to install)."
+	fi
 
 	log_success "Development mode running"
 }
