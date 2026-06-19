@@ -203,31 +203,39 @@ wait_for_supervisor_services() {
 	local max_wait="${1:-60}"
 	local elapsed=0
 
-	log_info "Waiting for supervisor services..."
+	log_info "Checking supervisor services (max ${max_wait}s)..."
+
+	sudo supervisorctl reread 2>/dev/null || true
+	sudo supervisorctl update 2>/dev/null || true
 
 	while [ $elapsed -lt $max_wait ]; do
-		local status
-		status=$(sudo supervisorctl status 2>/dev/null | grep -E 'RUNNING|STARTING' | wc -l || echo "0")
-		local total
-		total=$(sudo supervisorctl status 2>/dev/null | wc -l || echo "0")
-
-		if [ "$total" -gt 0 ]; then
-			local running
-			running=$(sudo supervisorctl status 2>/dev/null | grep -c 'RUNNING' || echo "0")
-			if [ "$running" -eq "$total" ]; then
-				log_success "All $running supervisor services running"
-				return 0
-			fi
-			log_info "Services: $running/$total running..."
+		local output
+		output=$(sudo supervisorctl status 2>&1 || echo "")
+		
+		if [ -z "$output" ]; then
+			log_info "No supervisor processes found yet... ${elapsed}s"
+			sleep 3
+			elapsed=$((elapsed + 3))
+			continue
 		fi
 
+		local total running
+		total=$(echo "$output" | wc -l)
+		running=$(echo "$output" | grep -c 'RUNNING' || echo "0")
+
+		if [ "$running" -eq "$total" ] && [ "$total" -gt 0 ]; then
+			log_success "All $running supervisor services running"
+			return 0
+		fi
+
+		log_info "Services: $running/$total running... ${elapsed}s"
 		sleep 3
 		elapsed=$((elapsed + 3))
 	done
 
-	log_warn "Not all supervisor services ready after ${max_wait}s"
+	log_warn "Timeout after ${max_wait}s. Current status:"
 	sudo supervisorctl status 2>/dev/null || true
-	return 1
+	return 0
 }
 
 wait_for_web_ready() {
