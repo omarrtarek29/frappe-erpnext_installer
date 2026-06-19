@@ -63,6 +63,7 @@ _apply_mariadb_config() {
 
 	sudo tee /etc/mysql/mariadb.conf.d/99-frappe.cnf >/dev/null <<EOF
 [mysqld]
+character-set-client-handshake = FALSE
 character-set-server = utf8mb4
 collation-server = utf8mb4_unicode_ci
 innodb_buffer_pool_size = $buffer_pool_size

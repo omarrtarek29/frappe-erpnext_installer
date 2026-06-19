@@ -205,6 +205,8 @@ wait_for_supervisor_services() {
 
 	log_info "Checking supervisor services (max ${max_wait}s)..."
 
+	sudo systemctl restart supervisor 2>/dev/null || true
+	sleep 2
 	sudo supervisorctl reread 2>/dev/null || true
 	sudo supervisorctl update 2>/dev/null || true
 

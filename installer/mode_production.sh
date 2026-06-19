@@ -15,31 +15,19 @@ setup_production() {
 	cd "$BENCH_PATH"
 	sudo bench setup production "$FRAPPE_USER" --yes
 
-	log_info "Waiting for services to be ready..."
-	sleep 5
+	log_info "Restarting supervisor..."
+	sudo systemctl restart supervisor
+	sleep 3
+	sudo supervisorctl reread
+	sudo supervisorctl update
+	sudo supervisorctl restart all 2>/dev/null || true
 
 	wait_for_supervisor_services 120 || {
 		log_warn "Some supervisor services may not be running"
 		sudo supervisorctl status
 	}
 
-	wait_for_bench_redis "$BENCH_PATH" 60 || {
-		log_error "Redis services not ready"
-		exit 1
-	}
-
-	if [ "${INSTALL_ERPNEXT:-yes}" = "yes" ]; then
-		log_info "Installing ERPNext on site..."
-		run_as_frappe_user "$FRAPPE_USER" "cd '$BENCH_PATH' && bench --site '$SITE_NAME' install-app erpnext"
-		log_success "ERPNext installed"
-	else
-		log_info "Skipping ERPNext installation"
-	fi
-
-	run_as_frappe_user "$FRAPPE_USER" "cd '$BENCH_PATH' && bench --site '$SITE_NAME' enable-scheduler"
-	run_as_frappe_user "$FRAPPE_USER" "cd '$BENCH_PATH' && bench --site '$SITE_NAME' set-maintenance-mode off"
-
-	sudo supervisorctl restart all 2>/dev/null || true
+	wait_for_web_ready "http://localhost:80" 60 || log_warn "Web server may not be responding on port 80"
 
 	setup_ssl_certificate
 

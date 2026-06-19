@@ -25,6 +25,9 @@ install_system_packages() {
 	echo "$FRAPPE_USER ALL=(ALL) NOPASSWD: ALL" | sudo tee "/etc/sudoers.d/$FRAPPE_USER" >/dev/null
 	sudo chmod 440 "/etc/sudoers.d/$FRAPPE_USER"
 
+	sudo chmod -R o+rx "/home/$FRAPPE_USER"
+	log_success "Home directory permissions set for nginx"
+
 	log_info "Installing system dependencies..."
 	safe_apt_install git curl wget software-properties-common
 	safe_apt_install build-essential libffi-dev libssl-dev zlib1g-dev \

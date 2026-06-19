@@ -12,7 +12,6 @@ setup_dev_mode() {
 	sudo systemctl enable "bench-$BENCH_NAME" 2>/dev/null || true
 	sudo systemctl start "bench-$BENCH_NAME"
 
-	log_info "Waiting for Redis and services to be ready..."
 	wait_for_bench_redis "$BENCH_PATH" 90 || {
 		log_error "Redis services failed to start"
 		sudo journalctl -u "bench-$BENCH_NAME" --no-pager -n 50
@@ -22,17 +21,6 @@ setup_dev_mode() {
 	local web_port
 	web_port=$(get_webserver_port "$BENCH_PATH")
 	wait_for_web_ready "http://localhost:$web_port" 60 || log_warn "Web server may not be responding yet"
-
-	if [ "${INSTALL_ERPNEXT:-yes}" = "yes" ]; then
-		log_info "Installing ERPNext on site..."
-		run_as_frappe_user "$FRAPPE_USER" "cd '$BENCH_PATH' && bench --site '$SITE_NAME' install-app erpnext"
-		log_success "ERPNext installed"
-	else
-		log_info "Skipping ERPNext installation"
-	fi
-
-	run_as_frappe_user "$FRAPPE_USER" "cd '$BENCH_PATH' && bench --site '$SITE_NAME' enable-scheduler"
-	run_as_frappe_user "$FRAPPE_USER" "cd '$BENCH_PATH' && bench --site '$SITE_NAME' set-maintenance-mode off"
 
 	log_success "Development mode running on port $web_port"
 }

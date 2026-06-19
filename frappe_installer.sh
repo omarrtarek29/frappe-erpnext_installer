@@ -114,6 +114,8 @@ main() {
 		ask_install_erpnext
 	fi
 
+	install_apps_with_temp_redis
+
 	if [ -n "$DOMAIN" ]; then
 		setup_production
 	else
