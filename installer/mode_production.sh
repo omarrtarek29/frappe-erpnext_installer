@@ -1,5 +1,42 @@
 #!/usr/bin/env bash
 
+_link_bench_configs() {
+	log_info "Linking bench configs to system paths..."
+
+	if [ -f "$BENCH_PATH/config/supervisor.conf" ]; then
+		sudo ln -sf "$BENCH_PATH/config/supervisor.conf" /etc/supervisor/conf.d/frappe-bench.conf
+		log_success "Supervisor config linked"
+	else
+		log_warn "Missing $BENCH_PATH/config/supervisor.conf"
+	fi
+
+	if [ -f "$BENCH_PATH/config/nginx.conf" ]; then
+		sudo ln -sf "$BENCH_PATH/config/nginx.conf" /etc/nginx/conf.d/frappe-bench.conf
+		log_success "Nginx config linked"
+	else
+		log_warn "Missing $BENCH_PATH/config/nginx.conf"
+	fi
+
+	sudo rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
+}
+
+_reload_supervisor() {
+	log_info "Reloading supervisor..."
+	sudo systemctl enable supervisor 2>/dev/null || true
+	sudo systemctl restart supervisor
+	sleep 3
+	sudo supervisorctl reread
+	sudo supervisorctl update
+	sudo supervisorctl restart all 2>/dev/null || true
+}
+
+_recover_supervisor() {
+	log_warn "Supervisor has no bench processes - regenerating config..."
+	run_as_frappe_user "$FRAPPE_USER" "cd '$BENCH_PATH' && bench setup supervisor '$FRAPPE_USER' --yes"
+	_link_bench_configs
+	_reload_supervisor
+}
+
 setup_production() {
 	log_info "Setting up production mode..."
 
@@ -11,21 +48,41 @@ setup_production() {
 	log_info "Installing ansible (required by bench)..."
 	sudo apt-get install -y ansible 2>/dev/null || sudo pip3 install ansible
 
-	log_info "Setting up production..."
 	cd "$BENCH_PATH"
+
+	if [ -n "$DOMAIN" ]; then
+		run_as_frappe_user "$FRAPPE_USER" "cd '$BENCH_PATH' && bench config dns_multitenant on"
+		if [ "$DOMAIN" != "$SITE_NAME" ]; then
+			run_as_frappe_user "$FRAPPE_USER" "cd '$BENCH_PATH' && bench setup add-domain '$DOMAIN' --site '$SITE_NAME'"
+		fi
+	fi
+
+	log_info "Setting up production (pass 1)..."
 	sudo bench setup production "$FRAPPE_USER" --yes
 
-	log_info "Restarting supervisor..."
-	sudo systemctl restart supervisor
-	sleep 3
-	sudo supervisorctl reread
-	sudo supervisorctl update
-	sudo supervisorctl restart all 2>/dev/null || true
+	log_info "Generating supervisor config..."
+	run_as_frappe_user "$FRAPPE_USER" "cd '$BENCH_PATH' && bench setup supervisor '$FRAPPE_USER' --yes"
 
-	wait_for_supervisor_services 120 || {
-		log_warn "Some supervisor services may not be running"
-		sudo supervisorctl status
-	}
+	log_info "Generating nginx config..."
+	run_as_frappe_user "$FRAPPE_USER" "cd '$BENCH_PATH' && bench setup nginx --yes"
+
+	_link_bench_configs
+	_reload_supervisor
+
+	log_info "Setting up production (pass 2)..."
+	sudo bench setup production "$FRAPPE_USER" --yes
+	_link_bench_configs
+	_reload_supervisor
+
+	if ! wait_for_supervisor_services 30; then
+		_recover_supervisor
+		wait_for_supervisor_services 90 || {
+			log_warn "Supervisor may not be fully ready"
+			sudo supervisorctl status 2>/dev/null || true
+		}
+	fi
+
+	sudo nginx -t && sudo systemctl reload nginx
 
 	wait_for_web_ready "http://localhost:80" 60 || log_warn "Web server may not be responding on port 80"
 

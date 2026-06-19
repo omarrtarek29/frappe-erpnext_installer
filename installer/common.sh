@@ -205,16 +205,18 @@ wait_for_supervisor_services() {
 
 	log_info "Checking supervisor services (max ${max_wait}s)..."
 
-	sudo systemctl restart supervisor 2>/dev/null || true
-	sleep 2
-	sudo supervisorctl reread 2>/dev/null || true
-	sudo supervisorctl update 2>/dev/null || true
-
 	while [ $elapsed -lt $max_wait ]; do
 		local output
 		output=$(sudo supervisorctl status 2>&1 || echo "")
-		
-		if [ -z "$output" ]; then
+
+		if echo "$output" | grep -qE 'unix:///var/run/supervisor.sock no such file|refused connection'; then
+			log_info "Supervisor socket not ready... ${elapsed}s"
+			sleep 3
+			elapsed=$((elapsed + 3))
+			continue
+		fi
+
+		if [ -z "$output" ] || echo "$output" | grep -q 'ERROR (no such process)'; then
 			log_info "No supervisor processes found yet... ${elapsed}s"
 			sleep 3
 			elapsed=$((elapsed + 3))
@@ -222,7 +224,7 @@ wait_for_supervisor_services() {
 		fi
 
 		local total running
-		total=$(echo "$output" | wc -l)
+		total=$(echo "$output" | grep -cE 'RUNNING|STARTING|STOPPED|FATAL|BACKOFF|EXITED' || echo "0")
 		running=$(echo "$output" | grep -c 'RUNNING' || echo "0")
 
 		if [ "$running" -eq "$total" ] && [ "$total" -gt 0 ]; then
@@ -237,7 +239,7 @@ wait_for_supervisor_services() {
 
 	log_warn "Timeout after ${max_wait}s. Current status:"
 	sudo supervisorctl status 2>/dev/null || true
-	return 0
+	return 1
 }
 
 wait_for_web_ready() {

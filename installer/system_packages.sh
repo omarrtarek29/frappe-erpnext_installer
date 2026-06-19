@@ -58,6 +58,8 @@ install_system_packages() {
 	_install_yarn
 	_install_redis
 	_install_mariadb
+	safe_apt_install supervisor nginx
+	sudo systemctl enable supervisor nginx 2>/dev/null || true
 }
 
 _install_uv() {
