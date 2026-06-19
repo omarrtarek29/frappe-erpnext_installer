@@ -151,6 +151,54 @@ wait_for_bench_services() {
 	return 1
 }
 
+wait_for_bench_redis() {
+	local bench_path="$1"
+	local max_wait="${2:-60}"
+	local config_file="$bench_path/sites/common_site_config.json"
+
+	log_info "Waiting for bench Redis instances (max ${max_wait}s)..."
+
+	if [ ! -f "$config_file" ]; then
+		log_error "Config file not found: $config_file"
+		return 1
+	fi
+
+	local queue_port cache_port
+	queue_port=$(grep -oP '"redis_queue":\s*"redis://[^:]+:\K[0-9]+' "$config_file" 2>/dev/null || echo "11000")
+	cache_port=$(grep -oP '"redis_cache":\s*"redis://[^:]+:\K[0-9]+' "$config_file" 2>/dev/null || echo "13000")
+
+	log_info "Redis queue port: $queue_port, cache port: $cache_port"
+
+	local elapsed=0
+	while [ $elapsed -lt $max_wait ]; do
+		local queue_ok=false cache_ok=false
+
+		if redis-cli -p "$queue_port" ping &>/dev/null; then
+			queue_ok=true
+		fi
+		if redis-cli -p "$cache_port" ping &>/dev/null; then
+			cache_ok=true
+		fi
+
+		if [ "$queue_ok" = true ] && [ "$cache_ok" = true ]; then
+			log_success "Redis ready - queue:$queue_port cache:$cache_port"
+			return 0
+		fi
+
+		sleep 2
+		elapsed=$((elapsed + 2))
+
+		if [ $((elapsed % 10)) -eq 0 ]; then
+			log_info "Waiting for Redis... ${elapsed}s (queue:$queue_ok cache:$cache_ok)"
+		fi
+	done
+
+	log_error "Redis not ready after ${max_wait}s"
+	log_info "Queue ($queue_port): $(redis-cli -p "$queue_port" ping 2>&1 || echo 'FAILED')"
+	log_info "Cache ($cache_port): $(redis-cli -p "$cache_port" ping 2>&1 || echo 'FAILED')"
+	return 1
+}
+
 wait_for_supervisor_services() {
 	local max_wait="${1:-60}"
 	local elapsed=0

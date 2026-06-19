@@ -8,8 +8,33 @@ setup_production() {
 		exit 1
 	}
 
+	log_info "Generating nginx config..."
+	run_as_frappe_user "$FRAPPE_USER" "cd '$BENCH_PATH' && bench setup nginx --yes"
+
+	log_info "Setting up production (nginx + supervisor)..."
+	sudo bash -c "cd '$BENCH_PATH' && /usr/local/bin/bench setup production '$FRAPPE_USER' --yes"
+
+	log_info "Starting services..."
+	sudo systemctl daemon-reload
+	sudo systemctl restart nginx 2>/dev/null || true
+	sudo supervisorctl reread 2>/dev/null || true
+	sudo supervisorctl update 2>/dev/null || true
+	sudo supervisorctl start all 2>/dev/null || true
+
+	log_info "Waiting for Redis and workers to be ready..."
+	wait_for_supervisor_services 120 || {
+		log_error "Supervisor services failed to start"
+		sudo supervisorctl status
+		exit 1
+	}
+
+	wait_for_bench_redis "$BENCH_PATH" 60 || {
+		log_error "Redis services not ready"
+		exit 1
+	}
+
 	if [ "${INSTALL_ERPNEXT:-yes}" = "yes" ]; then
-		log_info "Installing ERPNext on site (before production setup)..."
+		log_info "Installing ERPNext on site..."
 		run_as_frappe_user "$FRAPPE_USER" "cd '$BENCH_PATH' && bench --site '$SITE_NAME' install-app erpnext"
 		log_success "ERPNext installed"
 	else
@@ -19,20 +44,7 @@ setup_production() {
 	run_as_frappe_user "$FRAPPE_USER" "cd '$BENCH_PATH' && bench --site '$SITE_NAME' enable-scheduler"
 	run_as_frappe_user "$FRAPPE_USER" "cd '$BENCH_PATH' && bench --site '$SITE_NAME' set-maintenance-mode off"
 
-	log_info "Generating nginx config..."
-	run_as_frappe_user "$FRAPPE_USER" "cd '$BENCH_PATH' && bench setup nginx --yes"
-
-	log_info "Setting up production (nginx + supervisor)..."
-	sudo bash -c "cd '$BENCH_PATH' && /usr/local/bin/bench setup production '$FRAPPE_USER' --yes"
-
-	log_info "Reloading services..."
-	sudo systemctl daemon-reload
-	sudo systemctl restart nginx 2>/dev/null || true
-	sudo supervisorctl reread 2>/dev/null || true
-	sudo supervisorctl update 2>/dev/null || true
 	sudo supervisorctl restart all 2>/dev/null || true
-
-	wait_for_supervisor_services 90 || log_warn "Some supervisor services may not be running"
 
 	setup_ssl_certificate
 
