@@ -32,7 +32,7 @@ _reload_supervisor() {
 
 _recover_supervisor() {
 	log_warn "Supervisor has no bench processes - regenerating config..."
-	run_as_frappe_user "$FRAPPE_USER" "cd '$BENCH_PATH' && bench setup supervisor '$FRAPPE_USER' --yes"
+	run_as_frappe_user "$FRAPPE_USER" "cd '$BENCH_PATH' && bench setup supervisor --yes"
 	_link_bench_configs
 	_reload_supervisor
 }
@@ -61,7 +61,7 @@ setup_production() {
 	sudo bench setup production "$FRAPPE_USER" --yes
 
 	log_info "Generating supervisor config..."
-	run_as_frappe_user "$FRAPPE_USER" "cd '$BENCH_PATH' && bench setup supervisor '$FRAPPE_USER' --yes"
+	run_as_frappe_user "$FRAPPE_USER" "cd '$BENCH_PATH' && bench setup supervisor --yes"
 
 	log_info "Generating nginx config..."
 	run_as_frappe_user "$FRAPPE_USER" "cd '$BENCH_PATH' && bench setup nginx --yes"
