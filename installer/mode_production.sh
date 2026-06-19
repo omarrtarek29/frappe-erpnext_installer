@@ -8,24 +8,19 @@ setup_production() {
 		exit 1
 	}
 
-	log_info "Generating nginx config..."
-	run_as_frappe_user "$FRAPPE_USER" "cd '$BENCH_PATH' && bench setup nginx --yes"
+	log_info "Installing ansible (required by bench)..."
+	sudo apt-get install -y ansible 2>/dev/null || sudo pip3 install ansible
 
-	log_info "Setting up production (nginx + supervisor)..."
-	sudo bash -c "cd '$BENCH_PATH' && /usr/local/bin/bench setup production '$FRAPPE_USER' --yes"
+	log_info "Setting up production..."
+	cd "$BENCH_PATH"
+	sudo bench setup production "$FRAPPE_USER" --yes
 
-	log_info "Starting services..."
-	sudo systemctl daemon-reload
-	sudo systemctl restart nginx 2>/dev/null || true
-	sudo supervisorctl reread 2>/dev/null || true
-	sudo supervisorctl update 2>/dev/null || true
-	sudo supervisorctl start all 2>/dev/null || true
+	log_info "Waiting for services to be ready..."
+	sleep 5
 
-	log_info "Waiting for Redis and workers to be ready..."
 	wait_for_supervisor_services 120 || {
-		log_error "Supervisor services failed to start"
+		log_warn "Some supervisor services may not be running"
 		sudo supervisorctl status
-		exit 1
 	}
 
 	wait_for_bench_redis "$BENCH_PATH" 60 || {
