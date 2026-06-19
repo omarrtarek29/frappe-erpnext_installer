@@ -117,24 +117,107 @@ stop_sudo_keepalive() {
 	fi
 }
 
-wait_for_redis() {
-	local port="${1:-11000}"
-	local max_attempts="${2:-15}"
-	local wait_time=1
+wait_for_bench_services() {
+	local bench_path="$1"
+	local max_wait="${2:-120}"
+	local config_file="$bench_path/sites/common_site_config.json"
 
-	log_info "Waiting for Redis on port $port..."
-	for ((i = 1; i <= max_attempts; i++)); do
-		if redis-cli -p "$port" ping &>/dev/null; then
-			log_success "Redis on port $port is ready"
-			return 0
+	log_info "Waiting for bench services to be ready (max ${max_wait}s)..."
+
+	local elapsed=0
+	while [ $elapsed -lt $max_wait ]; do
+		if [ -f "$config_file" ]; then
+			local queue_port cache_port socketio_port
+			queue_port=$(grep -oP '"redis_queue":\s*"redis://[^:]+:\K[0-9]+' "$config_file" 2>/dev/null || echo "")
+			cache_port=$(grep -oP '"redis_cache":\s*"redis://[^:]+:\K[0-9]+' "$config_file" 2>/dev/null || echo "")
+			socketio_port=$(grep -oP '"socketio_port":\s*\K[0-9]+' "$config_file" 2>/dev/null || echo "9000")
+
+			local ready=0
+			[ -n "$queue_port" ] && redis-cli -p "$queue_port" ping &>/dev/null && ready=$((ready + 1))
+			[ -n "$cache_port" ] && redis-cli -p "$cache_port" ping &>/dev/null && ready=$((ready + 1))
+
+			if [ $ready -ge 2 ]; then
+				log_success "Bench Redis services ready (queue:$queue_port, cache:$cache_port)"
+				return 0
+			fi
 		fi
-		log_info "Attempt $i/$max_attempts - waiting ${wait_time}s..."
-		sleep "$wait_time"
-		[ "$wait_time" -lt 4 ] && wait_time=$((wait_time * 2))
+
+		sleep 2
+		elapsed=$((elapsed + 2))
+		[ $((elapsed % 10)) -eq 0 ] && log_info "Still waiting... ${elapsed}s elapsed"
 	done
 
-	log_warn "Redis on port $port not responding after $max_attempts attempts"
+	log_warn "Bench services not fully ready after ${max_wait}s"
 	return 1
+}
+
+wait_for_supervisor_services() {
+	local max_wait="${1:-60}"
+	local elapsed=0
+
+	log_info "Waiting for supervisor services..."
+
+	while [ $elapsed -lt $max_wait ]; do
+		local status
+		status=$(sudo supervisorctl status 2>/dev/null | grep -E 'RUNNING|STARTING' | wc -l || echo "0")
+		local total
+		total=$(sudo supervisorctl status 2>/dev/null | wc -l || echo "0")
+
+		if [ "$total" -gt 0 ]; then
+			local running
+			running=$(sudo supervisorctl status 2>/dev/null | grep -c 'RUNNING' || echo "0")
+			if [ "$running" -eq "$total" ]; then
+				log_success "All $running supervisor services running"
+				return 0
+			fi
+			log_info "Services: $running/$total running..."
+		fi
+
+		sleep 3
+		elapsed=$((elapsed + 3))
+	done
+
+	log_warn "Not all supervisor services ready after ${max_wait}s"
+	sudo supervisorctl status 2>/dev/null || true
+	return 1
+}
+
+wait_for_web_ready() {
+	local url="${1:-http://localhost:8000}"
+	local max_wait="${2:-60}"
+	local elapsed=0
+
+	log_info "Waiting for web server at $url..."
+
+	while [ $elapsed -lt $max_wait ]; do
+		if curl -s -o /dev/null -w "%{http_code}" "$url" 2>/dev/null | grep -qE '^(200|302|301)$'; then
+			log_success "Web server responding at $url"
+			return 0
+		fi
+		sleep 2
+		elapsed=$((elapsed + 2))
+	done
+
+	log_warn "Web server not responding after ${max_wait}s"
+	return 1
+}
+
+stop_bench_processes() {
+	local bench_path="$1"
+	local user="$2"
+
+	log_info "Stopping any existing bench processes..."
+	pkill -f "bench start" 2>/dev/null || true
+	pkill -f "honcho" 2>/dev/null || true
+
+	local pids
+	pids=$(pgrep -f "$bench_path" 2>/dev/null || true)
+	if [ -n "$pids" ]; then
+		log_info "Killing bench-related processes: $pids"
+		kill $pids 2>/dev/null || true
+		sleep 2
+		kill -9 $pids 2>/dev/null || true
+	fi
 }
 
 get_redis_queue_port() {
@@ -150,4 +233,45 @@ get_redis_queue_port() {
 		fi
 	fi
 	echo "11000"
+}
+
+get_webserver_port() {
+	local bench_path="$1"
+	local config_file="$bench_path/sites/common_site_config.json"
+
+	if [ -f "$config_file" ]; then
+		local port
+		port=$(grep -oP '"webserver_port":\s*\K[0-9]+' "$config_file" 2>/dev/null || echo "")
+		if [ -n "$port" ]; then
+			echo "$port"
+			return
+		fi
+	fi
+
+	local procfile="$bench_path/Procfile"
+	if [ -f "$procfile" ]; then
+		local port
+		port=$(grep -oP 'serve --port\s+\K[0-9]+' "$procfile" 2>/dev/null || echo "")
+		if [ -n "$port" ]; then
+			echo "$port"
+			return
+		fi
+	fi
+
+	echo "8000"
+}
+
+get_socketio_port() {
+	local bench_path="$1"
+	local config_file="$bench_path/sites/common_site_config.json"
+
+	if [ -f "$config_file" ]; then
+		local port
+		port=$(grep -oP '"socketio_port":\s*\K[0-9]+' "$config_file" 2>/dev/null || echo "")
+		if [ -n "$port" ]; then
+			echo "$port"
+			return
+		fi
+	fi
+	echo "9000"
 }

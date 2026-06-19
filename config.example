@@ -1,0 +1,23 @@
+# Frappe/ERPNext Installer Configuration
+# Copy this file and customize for non-interactive installation
+# Usage: ./frappe_installer.sh -c myconfig.conf -y
+
+# Required settings
+FRAPPE_VER="15"              # 15 or 16
+FRAPPE_USER="frappe"         # System user for Frappe
+SITE_NAME="erp.example.com"  # Your site name
+ADMIN_PASS="SecurePassword123!"  # Administrator password
+
+# Optional settings
+BENCH_NAME="frappe-bench"    # Bench directory name (default: frappe-bench)
+INSTALL_ERPNEXT="yes"        # Install ERPNext app (yes/no)
+
+# Production mode (leave empty for development)
+DOMAIN=""                    # Domain for production with nginx/SSL
+SSL_EMAIL=""                 # Email for SSL certificate renewal notifications
+
+# MariaDB (leave empty to configure interactively)
+MYSQL_ROOT_PASS=""           # MariaDB root password
+
+# Advanced
+FORCE_SITE="no"              # Force recreate site if exists (yes/no)

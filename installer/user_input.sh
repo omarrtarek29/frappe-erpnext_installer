@@ -40,11 +40,11 @@ collect_user_input() {
 	if [ "$FRAPPE_VER" = "15" ]; then
 		PYTHON_VER="3.11"
 		FRAPPE_BRANCH="version-15"
-		NODE_VER="24"
+		NODE_VER="20"
 	else
-		PYTHON_VER="3.14"
+		PYTHON_VER="3.12"
 		FRAPPE_BRANCH="version-16"
-		NODE_VER="24"
+		NODE_VER="20"
 	fi
 
 	FRAPPE_HOME="/home/$FRAPPE_USER"

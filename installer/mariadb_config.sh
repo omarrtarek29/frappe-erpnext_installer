@@ -3,7 +3,24 @@
 configure_mariadb() {
 	log_info "Configuring MariaDB..."
 
-	MYSQL_ROOT_PASS=""
+	if [ -n "${MYSQL_ROOT_PASS:-}" ]; then
+		log_info "Using provided MariaDB password from config"
+		if ! sudo mysql -uroot -p"$MYSQL_ROOT_PASS" -e "SELECT 1;" &>/dev/null; then
+			log_error "Provided MariaDB password is incorrect"
+			exit 1
+		fi
+		log_success "MariaDB password verified"
+	elif sudo mysql -uroot -e "SELECT 1;" &>/dev/null; then
+		log_info "MariaDB using socket authentication (no password)"
+		MYSQL_ROOT_PASS=""
+	else
+		_configure_mariadb_interactive
+	fi
+
+	_apply_mariadb_config
+}
+
+_configure_mariadb_interactive() {
 	read -p "Do you have a MariaDB root password? (y/n): " HAS_PASSWORD
 
 	if [ "$HAS_PASSWORD" = "y" ] || [ "$HAS_PASSWORD" = "Y" ]; then
@@ -38,29 +55,41 @@ SQL
 				log_success "Password set successfully"
 			else
 				log_info "Using socket authentication"
+				MYSQL_ROOT_PASS=""
 			fi
 		else
-			log_error "Cannot access MariaDB. Please configure it manually"
+			log_error "Cannot access MariaDB. Set MYSQL_ROOT_PASS in config or configure manually"
 			exit 1
 		fi
 	fi
+}
 
-	log_info "Applying MariaDB configuration..."
-	sudo tee /etc/mysql/mariadb.conf.d/99-frappe.cnf >/dev/null <<'EOF'
+_apply_mariadb_config() {
+	log_info "Applying MariaDB configuration for Frappe..."
+
+	local mem_mb
+	mem_mb=$(free -m | awk '/^Mem:/{print $2}')
+	local buffer_pool_size="256M"
+	[ "$mem_mb" -ge 8192 ] && buffer_pool_size="1G"
+	[ "$mem_mb" -ge 16384 ] && buffer_pool_size="2G"
+
+	sudo tee /etc/mysql/mariadb.conf.d/99-frappe.cnf >/dev/null <<EOF
 [mysqld]
 character-set-server = utf8mb4
 collation-server = utf8mb4_unicode_ci
-innodb_buffer_pool_size = 256M
+innodb_buffer_pool_size = $buffer_pool_size
+innodb_log_file_size = 64M
+innodb_file_per_table = 1
 
 [mysql]
 default-character-set = utf8mb4
 EOF
 
 	if sudo systemctl restart mariadb; then
-		log_success "MariaDB configured"
+		log_success "MariaDB configured (buffer_pool: $buffer_pool_size)"
 		sleep 2
 	else
-		log_warn "MariaDB restart failed"
+		log_warn "MariaDB restart failed - removing custom config"
 		sudo rm -f /etc/mysql/mariadb.conf.d/99-frappe.cnf
 		sudo systemctl restart mariadb
 	fi

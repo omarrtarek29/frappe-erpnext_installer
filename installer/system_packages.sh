@@ -2,17 +2,28 @@
 
 install_system_packages() {
 	log_info "Updating system packages..."
-	sudo apt-get update -y
-	sudo apt-get upgrade -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold"
+	apt_cmd="sudo apt-get"
+	[ "$EUID" -eq 0 ] && apt_cmd="apt-get"
+
+	$apt_cmd update -y
+	$apt_cmd upgrade -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold"
 
 	log_info "Setting up user: $FRAPPE_USER"
 	if id "$FRAPPE_USER" &>/dev/null; then
-		log_success "User already exists"
+		log_success "User $FRAPPE_USER already exists"
 	else
-		sudo adduser --disabled-password --gecos "" "$FRAPPE_USER"
-		sudo usermod -aG sudo "$FRAPPE_USER"
-		log_success "User created"
+		if [ "$EUID" -eq 0 ]; then
+			adduser --disabled-password --gecos "" "$FRAPPE_USER"
+			usermod -aG sudo "$FRAPPE_USER"
+		else
+			sudo adduser --disabled-password --gecos "" "$FRAPPE_USER"
+			sudo usermod -aG sudo "$FRAPPE_USER"
+		fi
+		log_success "User $FRAPPE_USER created"
 	fi
+
+	echo "$FRAPPE_USER ALL=(ALL) NOPASSWD: ALL" | sudo tee "/etc/sudoers.d/$FRAPPE_USER" >/dev/null
+	sudo chmod 440 "/etc/sudoers.d/$FRAPPE_USER"
 
 	log_info "Installing system dependencies..."
 	safe_apt_install git curl wget software-properties-common

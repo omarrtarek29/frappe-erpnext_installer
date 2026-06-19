@@ -1,26 +1,63 @@
 #!/usr/bin/env bash
 
 setup_dev_mode() {
-	log_info "Starting development mode..."
+	log_info "Setting up development mode..."
 
-	run_as_frappe_user "$FRAPPE_USER" "cd '$BENCH_PATH' && nohup bench start > bench.log 2>&1 &"
-	log_info "Bench starting in background..."
-
-	sleep 5
-
-	local redis_port
-	redis_port=$(get_redis_queue_port "$BENCH_PATH")
-	wait_for_redis "$redis_port" 15 || log_warn "Redis may not be ready - continuing anyway"
+	stop_bench_processes "$BENCH_PATH" "$FRAPPE_USER"
 
 	if [ "${INSTALL_ERPNEXT:-yes}" = "yes" ]; then
-		log_info "Installing ERPNext on site..."
+		log_info "Installing ERPNext on site (before starting bench)..."
 		run_as_frappe_user "$FRAPPE_USER" "cd '$BENCH_PATH' && bench --site '$SITE_NAME' install-app erpnext"
-		run_as_frappe_user "$FRAPPE_USER" "cd '$BENCH_PATH' && bench --site '$SITE_NAME' enable-scheduler"
-		run_as_frappe_user "$FRAPPE_USER" "cd '$BENCH_PATH' && bench --site '$SITE_NAME' set-maintenance-mode off"
-		log_success "ERPNext installation complete"
+		log_success "ERPNext installed"
 	else
 		log_info "Skipping ERPNext installation"
 	fi
 
-	log_success "Development mode running"
+	run_as_frappe_user "$FRAPPE_USER" "cd '$BENCH_PATH' && bench --site '$SITE_NAME' enable-scheduler"
+	run_as_frappe_user "$FRAPPE_USER" "cd '$BENCH_PATH' && bench --site '$SITE_NAME' set-maintenance-mode off"
+
+	create_dev_systemd_service
+
+	log_info "Starting bench service..."
+	sudo systemctl daemon-reload
+	sudo systemctl enable "bench-$BENCH_NAME" 2>/dev/null || true
+	sudo systemctl start "bench-$BENCH_NAME"
+
+	wait_for_bench_services "$BENCH_PATH" 90 || log_warn "Services may not be fully ready"
+
+	local web_port
+	web_port=$(get_webserver_port "$BENCH_PATH")
+	wait_for_web_ready "http://localhost:$web_port" 30 || log_warn "Web server may not be responding"
+
+	log_success "Development mode running on port $web_port"
+}
+
+create_dev_systemd_service() {
+	log_info "Creating systemd service for development bench..."
+
+	local service_name="bench-$BENCH_NAME"
+	local service_file="/etc/systemd/system/${service_name}.service"
+
+	sudo tee "$service_file" >/dev/null <<EOF
+[Unit]
+Description=Frappe Bench Development Server ($BENCH_NAME)
+After=network.target mariadb.service redis-server.service
+
+[Service]
+Type=simple
+User=$FRAPPE_USER
+WorkingDirectory=$BENCH_PATH
+ExecStart=/usr/local/bin/bench start
+ExecStop=/bin/kill -TERM \$MAINPID
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:$BENCH_PATH/logs/bench.log
+StandardError=append:$BENCH_PATH/logs/bench.log
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+	run_as_frappe_user "$FRAPPE_USER" "mkdir -p '$BENCH_PATH/logs'"
+	log_success "Systemd service created: $service_name"
 }
