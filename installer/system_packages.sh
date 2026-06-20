@@ -41,24 +41,17 @@ install_system_packages() {
 	fi
 
 	safe_apt_install libjpeg-dev libpng-dev libpq-dev
-	safe_apt_install wkhtmltopdf xvfb libfontconfig ||
-		log_warn "wkhtmltopdf installation failed - PDF generation may not work"
 	safe_apt_install python3-pip python3-setuptools python3-venv pkg-config
-
-	if ! command_exists pipx; then
-		safe_apt_install pipx || {
-			python3 -m pip install --user pipx
-			python3 -m pipx ensurepath
-		}
-	fi
+	safe_apt_install xvfb libfontconfig
 
 	_install_uv
 	_install_python
 	_install_nodejs
 	_install_yarn
+	_install_wkhtmltopdf
 	_install_redis
 	_install_mariadb
-	safe_apt_install supervisor nginx
+	safe_apt_install supervisor nginx ansible
 	sudo systemctl enable supervisor nginx 2>/dev/null || true
 }
 
@@ -86,76 +79,187 @@ _install_uv() {
 }
 
 _install_python() {
-	log_info "Installing Python $PYTHON_VER..."
+	log_info "Installing Python $PYTHON_VER via uv..."
 
-	if command_exists "python${PYTHON_VER}"; then
-		log_success "Python $PYTHON_VER already installed"
-	else
-		if ! grep -q "deadsnakes" /etc/apt/sources.list.d/*.list 2>/dev/null; then
-			sudo add-apt-repository -y ppa:deadsnakes/ppa
-			sudo apt-get update -y
-		fi
-		safe_apt_install "python${PYTHON_VER}" "python${PYTHON_VER}-dev" "python${PYTHON_VER}-venv"
-		if [ "$FRAPPE_VER" = "15" ]; then
-			safe_apt_install "python${PYTHON_VER}-distutils" 2>/dev/null || true
-		fi
-	fi
-
-	PYTHON_BIN=$(which "python${PYTHON_VER}")
-	if [ -z "$PYTHON_BIN" ]; then
-		log_error "Python $PYTHON_VER not found"
+	if ! command_exists uv; then
+		log_error "uv is required but not installed"
 		exit 1
 	fi
+
+	log_info "Installing Python $PYTHON_VER for $FRAPPE_USER..."
+	sudo -u "$FRAPPE_USER" -H bash -c "
+		export PATH=\"/usr/local/bin:\$HOME/.local/bin:\$PATH\"
+		uv python install $PYTHON_VER
+	" || {
+		log_error "Failed to install Python $PYTHON_VER via uv"
+		exit 1
+	}
+
+	PYTHON_BIN=$(sudo -u "$FRAPPE_USER" -H bash -c "
+		export PATH=\"/usr/local/bin:\$HOME/.local/bin:\$PATH\"
+		uv python find $PYTHON_VER 2>/dev/null
+	")
+
+	if [ -z "$PYTHON_BIN" ] || [ ! -x "$PYTHON_BIN" ]; then
+		log_error "Python $PYTHON_VER not found after uv install"
+		exit 1
+	fi
+
+	export PYTHON_BIN
 	log_success "Python: $PYTHON_BIN"
 }
 
 _install_nodejs() {
-	log_info "Installing Node.js $NODE_VER..."
+	log_info "Installing Node.js $NODE_VER via nvm..."
 
-	install_nodejs() {
-		log_info "Removing old Node.js installations..."
-		sudo rm -f /etc/apt/sources.list.d/nodesource.list* 2>/dev/null || true
-		sudo rm -f /etc/apt/keyrings/nodesource.gpg 2>/dev/null || true
-		NODE_PKGS=$(dpkg -l | grep -E '^ii\s+(nodejs|npm|libnode)' | awk '{print $2}' | tr '\n' ' ') || true
-		if [ -n "$NODE_PKGS" ]; then
-			sudo apt-get remove -y --purge $NODE_PKGS 2>/dev/null || true
-		fi
-		sudo rm -rf /usr/include/node /usr/lib/node_modules 2>/dev/null || true
-		sudo rm -f /usr/bin/node /usr/bin/nodejs /usr/bin/npm /usr/bin/npx 2>/dev/null || true
-		sudo apt-get autoremove -y --purge 2>/dev/null || true
-		sudo apt-get clean
-		sudo apt-get update -y
-		log_info "Installing Node.js $NODE_VER from NodeSource..."
-		curl -fsSL "https://deb.nodesource.com/setup_${NODE_VER}.x" | sudo -E bash -
-		sudo apt-get install -y nodejs
+	log_info "Removing old system Node.js installations..."
+	sudo rm -f /etc/apt/sources.list.d/nodesource.list* 2>/dev/null || true
+	sudo rm -f /etc/apt/keyrings/nodesource.gpg 2>/dev/null || true
+	NODE_PKGS=$(dpkg -l | grep -E '^ii\s+(nodejs|npm|libnode)' | awk '{print $2}' | tr '\n' ' ') || true
+	if [ -n "$NODE_PKGS" ]; then
+		sudo apt-get remove -y --purge $NODE_PKGS 2>/dev/null || true
+	fi
+	sudo rm -rf /usr/include/node /usr/lib/node_modules 2>/dev/null || true
+	sudo rm -f /usr/bin/node /usr/bin/nodejs /usr/bin/npm /usr/bin/npx 2>/dev/null || true
+	sudo rm -f /usr/local/bin/node /usr/local/bin/npm /usr/local/bin/npx 2>/dev/null || true
+
+	log_info "Installing nvm for $FRAPPE_USER..."
+	sudo -u "$FRAPPE_USER" -H bash -c '
+		export HOME="/home/'"$FRAPPE_USER"'"
+		curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+	' || {
+		log_error "Failed to install nvm"
+		exit 1
 	}
 
-	NEED_NODE=0
-	if ! command_exists node; then
-		NEED_NODE=1
-	else
-		CURRENT_NODE=$(node -v 2>/dev/null | cut -d. -f1 | tr -d v || echo "0")
-		if [ "$CURRENT_NODE" -lt "$NODE_VER" ] 2>/dev/null; then
-			NEED_NODE=1
-		fi
-	fi
+	log_info "Installing Node.js $NODE_VER..."
+	sudo -u "$FRAPPE_USER" -H bash -c '
+		export HOME="/home/'"$FRAPPE_USER"'"
+		export NVM_DIR="$HOME/.nvm"
+		[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+		nvm install '"$NODE_VER"'
+		nvm use '"$NODE_VER"'
+		nvm alias default '"$NODE_VER"'
+	' || {
+		log_error "Failed to install Node.js $NODE_VER"
+		exit 1
+	}
 
-	[ "$NEED_NODE" = "1" ] && install_nodejs
+	local node_bin_dir
+	node_bin_dir=$(sudo -u "$FRAPPE_USER" -H bash -c '
+		export HOME="/home/'"$FRAPPE_USER"'"
+		export NVM_DIR="$HOME/.nvm"
+		[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+		dirname "$(nvm which '"$NODE_VER"')"
+	')
 
-	if ! command_exists node; then
-		log_error "Node.js installation failed"
+	if [ -z "$node_bin_dir" ] || [ ! -d "$node_bin_dir" ]; then
+		log_error "Could not find Node.js bin directory"
 		exit 1
 	fi
-	log_success "Node.js $(node -v)"
+
+	log_info "Creating symlinks in /usr/local/bin..."
+	for bin in node npm npx; do
+		if [ -x "$node_bin_dir/$bin" ]; then
+			sudo ln -sf "$node_bin_dir/$bin" /usr/local/bin/$bin
+		fi
+	done
+
+	if ! /usr/local/bin/node --version &>/dev/null; then
+		log_error "Node.js symlink verification failed"
+		exit 1
+	fi
+
+	log_success "Node.js $(/usr/local/bin/node -v)"
 }
 
 _install_yarn() {
 	log_info "Installing Yarn..."
-	sudo npm install -g npm@latest 2>/dev/null || true
-	if ! command_exists yarn; then
-		sudo npm install -g yarn
+
+	local node_bin_dir
+	node_bin_dir=$(sudo -u "$FRAPPE_USER" -H bash -c '
+		export HOME="/home/'"$FRAPPE_USER"'"
+		export NVM_DIR="$HOME/.nvm"
+		[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+		dirname "$(nvm which '"$NODE_VER"')"
+	')
+
+	sudo -u "$FRAPPE_USER" -H bash -c '
+		export HOME="/home/'"$FRAPPE_USER"'"
+		export NVM_DIR="$HOME/.nvm"
+		[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+		npm install -g yarn
+	' || {
+		log_error "Failed to install yarn"
+		exit 1
+	}
+
+	if [ -x "$node_bin_dir/yarn" ]; then
+		sudo ln -sf "$node_bin_dir/yarn" /usr/local/bin/yarn
 	fi
-	log_success "Yarn $(yarn --version)"
+
+	if ! /usr/local/bin/yarn --version &>/dev/null; then
+		log_error "Yarn symlink verification failed"
+		exit 1
+	fi
+
+	log_success "Yarn $(/usr/local/bin/yarn --version)"
+}
+
+_install_wkhtmltopdf() {
+	log_info "Installing wkhtmltopdf (patched Qt version)..."
+
+	if command_exists wkhtmltopdf; then
+		local wk_ver
+		wk_ver=$(wkhtmltopdf --version 2>&1 || true)
+		if echo "$wk_ver" | grep -q "patched qt"; then
+			log_success "wkhtmltopdf (patched qt) already installed"
+			return 0
+		fi
+		log_info "Removing non-patched wkhtmltopdf..."
+		sudo apt-get remove -y --purge wkhtmltopdf 2>/dev/null || true
+	fi
+
+	local arch
+	arch=$(dpkg --print-architecture)
+	local deb_url=""
+	local deb_file="/tmp/wkhtmltox.deb"
+
+	case "$arch" in
+		amd64)
+			deb_url="https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6.1-2/wkhtmltox_0.12.6.1-2.jammy_amd64.deb"
+			;;
+		arm64)
+			deb_url="https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6.1-2/wkhtmltox_0.12.6.1-2.jammy_arm64.deb"
+			;;
+		*)
+			log_warn "Unknown architecture: $arch - falling back to apt wkhtmltopdf (may not have patched qt)"
+			safe_apt_install wkhtmltopdf || true
+			return 0
+			;;
+	esac
+
+	log_info "Downloading wkhtmltopdf for $arch..."
+	curl -fsSL -o "$deb_file" "$deb_url" || {
+		log_warn "Failed to download wkhtmltopdf - falling back to apt"
+		safe_apt_install wkhtmltopdf || true
+		rm -f "$deb_file"
+		return 0
+	}
+
+	log_info "Installing wkhtmltopdf..."
+	sudo dpkg -i "$deb_file" 2>/dev/null || {
+		log_info "Resolving dependencies..."
+		sudo apt-get -f install -y
+		sudo dpkg -i "$deb_file"
+	}
+	rm -f "$deb_file"
+
+	if command_exists wkhtmltopdf; then
+		log_success "wkhtmltopdf $(wkhtmltopdf --version 2>&1 | head -1)"
+	else
+		log_warn "wkhtmltopdf installation failed - PDF generation may not work"
+	fi
 }
 
 _install_redis() {
@@ -174,9 +278,79 @@ _install_redis() {
 
 _install_mariadb() {
 	log_info "Installing MariaDB..."
+
+	local required_version=""
+	if [ "$FRAPPE_VER" = "15" ]; then
+		required_version="10.6"
+	else
+		required_version="11.4"
+	fi
+
+	local need_install=false
 	if ! command_exists mariadb; then
+		need_install=true
+	else
+		local current_ver
+		current_ver=$(mariadb --version 2>/dev/null | grep -oP '\d+\.\d+' | head -1 || echo "0")
+		local current_major current_minor req_major req_minor
+		current_major=$(echo "$current_ver" | cut -d. -f1)
+		current_minor=$(echo "$current_ver" | cut -d. -f2)
+		req_major=$(echo "$required_version" | cut -d. -f1)
+		req_minor=$(echo "$required_version" | cut -d. -f2)
+
+		if [ "$current_major" -lt "$req_major" ] 2>/dev/null || \
+		   { [ "$current_major" -eq "$req_major" ] && [ "$current_minor" -lt "$req_minor" ]; } 2>/dev/null; then
+			log_info "MariaDB $current_ver found, but $required_version+ required"
+			need_install=true
+		else
+			log_success "MariaDB $current_ver meets requirement ($required_version+)"
+		fi
+	fi
+
+	if [ "$need_install" = true ]; then
+		_add_mariadb_repo "$required_version" || {
+			log_warn "MariaDB repo setup failed, using distro package"
+		}
 		safe_apt_install mariadb-server mariadb-client
 	fi
+
 	sudo systemctl enable mariadb 2>/dev/null || true
 	sudo systemctl start mariadb 2>/dev/null || true
+}
+
+_add_mariadb_repo() {
+	local version="$1"
+	log_info "Adding MariaDB $version repository..."
+
+	. /etc/os-release 2>/dev/null || true
+	local codename="${VERSION_CODENAME:-}"
+
+	if [ -z "$codename" ]; then
+		case "${VERSION_ID:-}" in
+			20.04) codename="focal" ;;
+			22.04) codename="jammy" ;;
+			24.04) codename="noble" ;;
+			*) log_warn "Unknown Ubuntu version"; return 1 ;;
+		esac
+	fi
+
+	sudo apt-get install -y apt-transport-https curl gnupg 2>/dev/null || true
+
+	sudo mkdir -p /etc/apt/keyrings
+	curl -fsSL "https://mariadb.org/mariadb_release_signing_key.pgp" | \
+		sudo gpg --dearmor -o /etc/apt/keyrings/mariadb.gpg 2>/dev/null || {
+		log_warn "Failed to add MariaDB GPG key"
+		return 1
+	}
+
+	local repo_line="deb [signed-by=/etc/apt/keyrings/mariadb.gpg] https://dlm.mariadb.com/repo/mariadb-server/$version/repo/ubuntu $codename main"
+	echo "$repo_line" | sudo tee /etc/apt/sources.list.d/mariadb.list > /dev/null
+
+	sudo apt-get update -y || {
+		log_warn "Failed to update after adding MariaDB repo"
+		sudo rm -f /etc/apt/sources.list.d/mariadb.list
+		return 1
+	}
+
+	log_success "MariaDB $version repository added"
 }

@@ -1,25 +1,5 @@
 #!/usr/bin/env bash
 
-_link_bench_configs() {
-	log_info "Linking bench configs to system paths..."
-
-	if [ -f "$BENCH_PATH/config/supervisor.conf" ]; then
-		sudo ln -sf "$BENCH_PATH/config/supervisor.conf" /etc/supervisor/conf.d/frappe-bench.conf
-		log_success "Supervisor config linked"
-	else
-		log_warn "Missing $BENCH_PATH/config/supervisor.conf"
-	fi
-
-	if [ -f "$BENCH_PATH/config/nginx.conf" ]; then
-		sudo ln -sf "$BENCH_PATH/config/nginx.conf" /etc/nginx/conf.d/frappe-bench.conf
-		log_success "Nginx config linked"
-	else
-		log_warn "Missing $BENCH_PATH/config/nginx.conf"
-	fi
-
-	sudo rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
-}
-
 _reload_supervisor() {
 	log_info "Reloading supervisor..."
 	sudo systemctl enable supervisor 2>/dev/null || true
@@ -32,8 +12,10 @@ _reload_supervisor() {
 
 _recover_supervisor() {
 	log_warn "Supervisor has no bench processes - regenerating config..."
-	run_as_frappe_user "$FRAPPE_USER" "cd '$BENCH_PATH' && bench setup supervisor --yes"
-	_link_bench_configs
+	_run_bench_cmd "bench setup supervisor --yes"
+	restore_other_bench_symlinks
+	remove_duplicate_bench_symlinks
+	ensure_bench_service_links
 	_reload_supervisor
 }
 
@@ -45,33 +27,32 @@ setup_production() {
 		exit 1
 	}
 
-	log_info "Installing ansible (required by bench)..."
-	sudo apt-get install -y ansible 2>/dev/null || sudo pip3 install ansible
-
 	cd "$BENCH_PATH"
 
 	if [ -n "$DOMAIN" ]; then
-		run_as_frappe_user "$FRAPPE_USER" "cd '$BENCH_PATH' && bench config dns_multitenant on"
+		_run_bench_cmd "bench config dns_multitenant on"
 		if [ "$DOMAIN" != "$SITE_NAME" ]; then
-			run_as_frappe_user "$FRAPPE_USER" "cd '$BENCH_PATH' && bench setup add-domain '$DOMAIN' --site '$SITE_NAME'"
+			_run_bench_cmd "bench setup add-domain '$DOMAIN' --site '$SITE_NAME'"
 		fi
 	fi
 
-	log_info "Setting up production (pass 1)..."
-	sudo bench setup production "$FRAPPE_USER" --yes
+	# bench setup production creates ${BENCH_NAME}.conf symlinks itself.
+	# Fix any cross-bench symlink damage from prior installs, then clean wrong names for this bench only.
+	restore_other_bench_symlinks
+	remove_duplicate_bench_symlinks
+	sudo rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
 
-	log_info "Generating supervisor config..."
-	run_as_frappe_user "$FRAPPE_USER" "cd '$BENCH_PATH' && bench setup supervisor --yes"
+	log_info "Running bench setup production..."
+	cd "$BENCH_PATH"
+	sudo env "PATH=$PATH" bench setup production "$FRAPPE_USER" --yes
 
-	log_info "Generating nginx config..."
-	run_as_frappe_user "$FRAPPE_USER" "cd '$BENCH_PATH' && bench setup nginx --yes"
+	log_info "Generating supervisor and nginx configs..."
+	_run_bench_cmd "bench setup supervisor --yes"
+	_run_bench_cmd "bench setup nginx --yes"
 
-	_link_bench_configs
-	_reload_supervisor
-
-	log_info "Setting up production (pass 2)..."
-	sudo bench setup production "$FRAPPE_USER" --yes
-	_link_bench_configs
+	restore_other_bench_symlinks
+	remove_duplicate_bench_symlinks
+	ensure_bench_service_links
 	_reload_supervisor
 
 	if ! wait_for_supervisor_services 30; then
@@ -89,6 +70,18 @@ setup_production() {
 	setup_ssl_certificate
 
 	log_success "Production mode configured"
+}
+
+_run_bench_cmd() {
+	local cmd="$1"
+	sudo -u "$FRAPPE_USER" -H bash -c "
+		export PATH=\"/usr/local/bin:/usr/bin:/bin\"
+		export HOME=\"/home/$FRAPPE_USER\"
+		export NVM_DIR=\"\$HOME/.nvm\"
+		[ -s \"\$NVM_DIR/nvm.sh\" ] && . \"\$NVM_DIR/nvm.sh\"
+		cd '$BENCH_PATH'
+		$cmd
+	"
 }
 
 setup_ssl_certificate() {

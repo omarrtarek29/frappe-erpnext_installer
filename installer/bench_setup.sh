@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 
 install_bench_and_site() {
-	install_bench_globally
-
 	log_info "Initializing Bench..."
+
+	if [ -d "$BENCH_PATH" ]; then
+		log_error "Bench directory already exists at $BENCH_PATH"
+		log_error "Choose a different BENCH_NAME or remove the existing directory"
+		exit 1
+	fi
 
 	local site_flags=""
 	if [ "${FORCE_SITE:-no}" = "yes" ]; then
@@ -17,21 +21,28 @@ install_bench_and_site() {
 		mysql_pass_escaped=$(printf '%s' "$MYSQL_ROOT_PASS" | sed 's/[&/\]/\\&/g')
 	fi
 
+	log_info "Creating bench with Python: $PYTHON_BIN"
+
 	sudo -u "$FRAPPE_USER" -H bash -c "
 set -e
 export PATH=\"/usr/local/bin:/usr/bin:/bin\"
+export HOME=\"/home/$FRAPPE_USER\"
+export NVM_DIR=\"\$HOME/.nvm\"
+[ -s \"\$NVM_DIR/nvm.sh\" ] && . \"\$NVM_DIR/nvm.sh\"
 export ADMIN_PASS='$admin_pass_escaped'
 export MYSQL_ROOT_PASS='$mysql_pass_escaped'
 
 cd \"$FRAPPE_HOME\"
 
-if [ ! -d \"$BENCH_PATH\" ]; then
-    bench init \"$BENCH_PATH\" --python \"$PYTHON_BIN\" --frappe-branch \"$FRAPPE_BRANCH\"
-else
-    echo 'Bench already exists at $BENCH_PATH'
-fi
+bench init \"$BENCH_PATH\" --python \"$PYTHON_BIN\" --frappe-branch \"$FRAPPE_BRANCH\"
 
 cd \"$BENCH_PATH\"
+
+# Verify frappe is importable
+if ! ./env/bin/python -c 'import frappe' 2>/dev/null; then
+    echo 'ERROR: frappe module not importable after bench init'
+    exit 1
+fi
 
 if [ ! -d \"apps/erpnext\" ]; then
     bench get-app erpnext --branch \"$FRAPPE_BRANCH\"
@@ -55,7 +66,38 @@ fi
 bench use \"$SITE_NAME\"
 "
 
+	_verify_bench_integrity
+	configure_bench_redis
+
 	log_success "Bench initialized with site $SITE_NAME"
+}
+
+_verify_bench_integrity() {
+	log_info "Verifying bench integrity..."
+
+	if [ ! -d "$BENCH_PATH/env" ]; then
+		log_error "Bench env directory missing"
+		exit 1
+	fi
+
+	if [ ! -x "$BENCH_PATH/env/bin/python" ]; then
+		log_error "Bench Python not found"
+		exit 1
+	fi
+
+	local import_check
+	import_check=$(sudo -u "$FRAPPE_USER" -H bash -c "
+		cd '$BENCH_PATH'
+		./env/bin/python -c 'import frappe; print(frappe.__version__)' 2>&1
+	" || echo "FAILED")
+
+	if [ "$import_check" = "FAILED" ] || [ -z "$import_check" ]; then
+		log_error "Frappe module not importable - bench may be corrupted"
+		log_error "Delete $BENCH_PATH and retry"
+		exit 1
+	fi
+
+	log_success "Bench integrity verified - frappe $import_check"
 }
 
 install_apps_with_temp_redis() {
@@ -66,6 +108,7 @@ install_apps_with_temp_redis() {
 
 	log_info "Starting temporary bench for app installation..."
 
+	configure_bench_redis
 	stop_bench_processes "$BENCH_PATH" "$FRAPPE_USER"
 	run_as_frappe_user "$FRAPPE_USER" "mkdir -p '$BENCH_PATH/logs'"
 
@@ -77,6 +120,8 @@ install_apps_with_temp_redis() {
 		stop_bench_processes "$BENCH_PATH" "$FRAPPE_USER"
 		exit 1
 	}
+
+	prepare_bench_redis_runtime
 
 	log_info "Installing ERPNext on site..."
 	run_as_frappe_user "$FRAPPE_USER" "cd '$BENCH_PATH' && bench --site '$SITE_NAME' install-app erpnext"

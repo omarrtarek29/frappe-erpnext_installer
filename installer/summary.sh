@@ -22,9 +22,9 @@ print_summary() {
 		echo "  URL        : https://$DOMAIN"
 	else
 		local web_port
-		web_port=$(get_webserver_port "$BENCH_PATH")
+		web_port="${DEV_WEB_PORT:-$(get_webserver_port "$BENCH_PATH")}"
 		echo "  Mode       : Development"
-		echo "  URL        : http://$SERVER_IP:$web_port"
+		echo "  URL        : http://$SERVER_IP:$web_port (after starting bench serve)"
 	fi
 	echo ""
 	echo "  Login:"
@@ -44,19 +44,30 @@ print_summary() {
 		echo "  sudo systemctl status nginx"
 		echo "  sudo systemctl status supervisor"
 	else
-		echo "Development Commands:"
-		echo "  sudo systemctl status bench-$bench_name   # Check service"
-		echo "  sudo systemctl restart bench-$bench_name  # Restart"
-		echo "  sudo journalctl -u bench-$bench_name -f   # View logs"
+		local web_port
+		web_port="${DEV_WEB_PORT:-$(get_webserver_port "$BENCH_PATH")}"
+		echo "Common Commands:"
+		echo "  bench --site $SITE_NAME console       # Python console"
+		echo "  bench --site $SITE_NAME mariadb       # Database shell"
+		echo "  bench get-app <app-name>              # Install app"
 		echo ""
-		echo "Manual Start (alternative):"
-		echo "  cd $BENCH_PATH && bench start"
+		echo "==========================================="
+		echo ""
+		echo "  Next step — start the dev server:"
+		echo ""
+		echo "    cd ~/$bench_name"
+		echo "    bench serve --port $web_port"
+		echo ""
+		echo "  Then open: http://$SERVER_IP:$web_port"
+		echo ""
 	fi
-	echo ""
-	echo "Common Commands:"
-	echo "  cd $BENCH_PATH"
-	echo "  bench --site $SITE_NAME console       # Python console"
-	echo "  bench --site $SITE_NAME mariadb       # Database shell"
-	echo "  bench get-app <app-name>              # Install app"
-	echo ""
+
+	if [ -n "$DOMAIN" ]; then
+		echo "Common Commands:"
+		echo "  cd $BENCH_PATH"
+		echo "  bench --site $SITE_NAME console       # Python console"
+		echo "  bench --site $SITE_NAME mariadb       # Database shell"
+		echo "  bench get-app <app-name>              # Install app"
+		echo ""
+	fi
 }

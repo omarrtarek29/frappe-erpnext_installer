@@ -1,303 +1,106 @@
-# Frappe/ERPNext Automated Installer (v15 & v16)
+# Frappe/ERPNext Installer
 
-A simple, automated bash script to install **Frappe Framework** and **ERPNext** on Ubuntu systems with minimal manual intervention. Supports **Frappe v15** and **v16**; you choose the version at the start.
+Automated bash installer for **Frappe v15/v16** and **ERPNext** on Ubuntu 20.04, 22.04, and 24.04.
 
-## Features
+It sets up system dependencies, Python (via **uv**), Node.js 24 (via **nvm**), MariaDB, Redis, the bench CLI, a Frappe site, and optional production services (Nginx, Supervisor, SSL).
 
-- ✅ **Frappe v15 or v16** — choose version at install time (Python 3.10 for v15, Python 3.14 for v16)
-- ✅ Automated installation of all dependencies
-- ✅ Node.js 24 and same bench stack for both versions (uv, pipx, latest bench)
-- ✅ MariaDB setup with interactive or existing password support
-- ✅ Bench initialization and ERPNext app installation
-- ✅ Production-ready setup with Nginx and Supervisor
-- ✅ Optional SSL certificate setup with Let's Encrypt
-- ✅ UFW firewall configuration
+## Requirements
 
-## Prerequisites
-
-- **Operating System**: Ubuntu 20.04 / 22.04 / 24.04 (fresh installation recommended)
-- **User Access**: Root or sudo privileges
-- **RAM**: Minimum 4GB (8GB recommended for production)
-- **Storage**: Minimum 40GB free disk space
-- **Network**: Active internet connection
+- Ubuntu 20.04 / 22.04 / 24.04
+- sudo access
+- 4 GB RAM minimum (8 GB recommended for production)
+- Internet connection
 
 ## Quick Start
 
-### Step 1: Download the Script
-
 ```bash
-# Clone the repository
-git clone https://github.com/omarrtarek29/frappe-erpnext_installer/
-
-# Or if you have it locally, just navigate to its directory
-cd /path/to/script
-```
-
-### Step 2: Make it Executable
-
-```bash
+git clone https://github.com/omarrtarek29/frappe-erpnext_installer
+cd frappe-erpnext_installer
 chmod +x frappe_installer.sh
-```
-
-### Step 3: Run the Installer
-
-```bash
 ./frappe_installer.sh
 ```
 
-## Installation Process
+The wizard asks for:
 
-When you run the script, you'll be prompted for the following information:
+| Prompt | Purpose |
+|--------|---------|
+| Frappe version | `15` or `16` |
+| System user | Linux user that owns the bench (e.g. `frappe`) |
+| Bench name | Directory name under `/home/<user>/` (e.g. `frappe-bench`) |
+| Site name | Frappe site name (e.g. `site.local` or `erp.example.com`) |
+| Admin password | ERPNext `Administrator` login password |
+| Domain | Leave **empty** for development, or enter a domain for production + SSL |
 
-### 1. **Frappe Version (15 or 16)**
-```
-Enter Frappe version (15 or 16): 15
-```
-- **15** — Frappe/ERPNext v15 (Python 3.10, payments app + ERPNext)
-- **16** — Frappe/ERPNext v16 (Python 3.14, ERPNext only)
-- Same stack for both: Node 24, uv, pipx, latest bench, same MariaDB config
+## Development vs Production
 
-### 2. **Frappe System User**
-```
-Enter frappe system user: frappe
-```
-- This is the Linux user that will own and run the Frappe/ERPNext application
-- Default recommendation: `frappe`
-- The script will create this user if it doesn't exist
+**Development** (no domain):
+- Installs the bench and site only
+- Does not start services automatically
+- After install, run:
 
-### 3. **Bench Name**
-```
-Enter bench name (example: frappe-bench): frappe-bench
-```
-- Name of the bench directory
-- The bench will be created at: `/home/[frappe-user]/[bench-name]`
-- Example: `frappe-bench` → `/home/frappe/frappe-bench`
-
-### 4. **Site Name**
-```
-Enter site name: mysite.local
-```
-- Domain name for your ERPNext site
-- For local/development: use `.local` domain (e.g., `mysite.local`)
-- For production: use your actual domain (e.g., `erp.mycompany.com`)
-
-### 5. **Admin Password**
-```
-Enter admin password for Frappe site: 
-```
-- Password for the Administrator account in ERPNext
-- This is what you'll use to log in after installation
-- Choose a strong password
-
-### 6. **Domain (Optional)**
-```
-Enter domain (leave empty to skip SSL): 
-```
-- If you have a registered domain and want SSL (HTTPS)
-- Enter your domain name (e.g., `erp.mycompany.com`)
-- Leave empty to skip SSL setup
-- **Note**: Domain must be pointing to your server's IP address
-
-### 6. **MariaDB Setup**
-
-The script will ask:
-```
-Do you already have a MariaDB root password set? (y/n):
-```
-
-#### Option A: You Already Have a Password (answer: y)
-```
-Enter your existing MariaDB root password: 
-```
-- Enter your existing MariaDB root password
-- The script will verify it before continuing
-
-#### Option B: First Time Setup (answer: n)
-
-The script will guide you through `mysql_secure_installation`:
-
-1. **Enter current password for root**: Press `ENTER` (no password set yet)
-2. **Switch to unix_socket authentication**: Type `y` and press `ENTER`
-3. **Change the root password**: Type `y`, then enter your new password twice
-4. **Remove anonymous users**: Type `y`
-5. **Disallow root login remotely**: Type `n`
-6. **Remove test database**: Type `y`
-7. **Reload privilege tables**: Type `y`
-
-After completion, the script will ask:
-```
-Enter the MariaDB root password you just set:
-```
-Enter the password you created during the secure installation.
-
-## What Gets Installed
-
-The script automatically installs and configures:
-
-### System Packages
-- Git, curl, wget, nano
-- Software Properties Common
-- MariaDB Server & Client
-- Redis Server
-- wkhtmltopdf (for PDF generation)
-- Build essentials and development libraries
-- python3-pip, python3-setuptools, pipx
-
-### Programming Languages & Tools (by version)
-| Component   | v15              | v16              |
-|------------|------------------|------------------|
-| Python     | 3.10 (deadsnakes)| 3.14 (deadsnakes)|
-| Node.js    | 24               | 24               |
-| Yarn       | ✓                | ✓                |
-| uv         | ✓                | ✓                |
-| Bench      | pipx (latest)    | pipx (latest)    |
-
-### Frappe Stack
-- **Frappe Bench** (CLI tool for managing Frappe applications)
-- **Frappe Framework v15 or v16**
-- **ERPNext v15 or v16** (full ERP application)
-- **Frappe Payments for v15**
-
-### Production Services
-- **Nginx** (web server and reverse proxy)
-- **Supervisor** (process manager for background workers)
-- **UFW Firewall** (configured to allow ports 22, 80, 443, 8000)
-
-### Optional
-- **Certbot** (for SSL/TLS certificates via Let's Encrypt)
-
-## Post-Installation
-
-After successful installation, you'll see:
-
-```
-=======================================
- FRAPPE/ERPNEXT INSTALLATION COMPLETE 
-=======================================
- Version   : Frappe 15 (version-15) or Frappe 16 (version-16)
- Bench Path: /home/frappe/frappe-bench
- Site Name : mysite.local
- Python    : /usr/bin/python3.10 (v15) or /usr/bin/python3.14 (v16)
- Access URL: http://YOUR_SERVER_IP
- Domain    : https://yourdomain.com (if configured)
-=======================================
-```
-
-### Accessing ERPNext
-
-1. Open your web browser
-2. Navigate to:
-   - **Without domain**: `http://YOUR_SERVER_IP`
-   - **With domain**: `https://yourdomain.com`
-
-3. Login with:
-   - **Username**: `Administrator`
-   - **Password**: The admin password you set during installation
-
-## Useful Commands
-
-After installation, here are some helpful commands:
-
-### Navigate to Bench Directory
 ```bash
-cd /home/frappe/frappe-bench
+cd ~/frappe-bench
+bench serve --port 8000
 ```
 
-### Start in Development Mode
+Use the port shown at the end of the installer output.
+
+**Production** (domain provided):
+- Configures Nginx, Supervisor, and optional Let's Encrypt SSL
+- Site is served on `https://your-domain`
+
+## Non-Interactive Install
+
+Copy and edit the example config:
+
 ```bash
-bench start
+cp config.example myconfig.conf
+./frappe_installer.sh -c myconfig.conf -y
 ```
-This starts all services in the foreground (useful for development/testing)
 
-### Restart in Production Mode
+See `config.example` for all supported variables.
+
+## Version Matrix
+
+| Component | v15 | v16 |
+|-----------|-----|-----|
+| Python | 3.11 (uv) | 3.14 (uv) |
+| Node.js | 24 (nvm) | 24 (nvm) |
+| Bench CLI | uv tool | uv tool |
+| Apps | Frappe + ERPNext + payments | Frappe + ERPNext |
+
+## What the Script Does
+
+1. Checks OS and installs system packages (MariaDB, Redis, build tools, wkhtmltopdf, etc.)
+2. Installs Python, Node, Yarn, and the global `bench` command
+3. Creates the bench, site, and installs ERPNext
+4. Applies **dev** or **production** setup based on whether a domain was given
+5. Opens firewall ports and prints a summary with next steps
+
+## After Installation
+
+**Development**
+
 ```bash
-bench restart
+cd ~/frappe-bench
+bench serve --port 8000
+bench --site site.local console
 ```
 
-### Check Service Status
+**Production**
+
 ```bash
 sudo supervisorctl status
-```
-
-### Restart All Services
-```bash
 sudo supervisorctl restart all
+bench --site erp.example.com migrate
 ```
 
-### List Installed Apps
-```bash
-bench --site mysite.local list-apps
-```
-
-### Check Bench Status
-```bash
-bench version
-```
-
-### View Logs
-```bash
-# Nginx access logs
-sudo tail -f /var/log/nginx/access.log
-
-# Nginx error logs
-sudo tail -f /var/log/nginx/error.log
-
-# Supervisor logs
-sudo tail -f /var/log/supervisor/supervisord.log
-```
+Default login: **Administrator** / password you set during install.
 
 ## Troubleshooting
 
-### Can't Access the Site
+- **Site not loading (dev):** Make sure `bench serve` is running and the firewall allows the port shown in the summary.
+- **Site not loading (production):** Check `sudo supervisorctl status` and `sudo systemctl status nginx`.
+- **SSL failed:** Confirm DNS points to this server, then run `sudo certbot --nginx -d your-domain.com`.
 
-1. Check if services are running:
-   ```bash
-   sudo supervisorctl status
-   ```
-
-2. Check Nginx status:
-   ```bash
-   sudo systemctl status nginx
-   ```
-
-3. Check firewall:
-   ```bash
-   sudo ufw status
-   ```
-
-### Supervisor Issues
-
-If you encounter supervisor-related issues or services are not starting:
-
-```bash
-cd /home/frappe/frappe-bench
-sudo bench setup production [$FRAPPE_USER]
-```
-
-This will reconfigure supervisor and nginx for production.
-
-### SSL Certificate Issues
-
-If SSL certificate installation failed or you need to reinstall it:
-
-```bash
-sudo certbot --nginx -d yourdomain.com
-```
-
-Make sure your domain's DNS A record is pointing to your server's IP address before running this command.
-
-### MariaDB Connection Issues
-
-1. Verify MariaDB is running:
-   ```bash
-   sudo systemctl status mariadb
-   ```
-
-2. Test connection:
-   ```bash
-   sudo mysql -uroot -p
-   ```
-
----
-
-**Note**: This script is designed for Ubuntu systems. For other Linux distributions, you may need to modify package manager commands and package names accordingly.
+For other Linux distros, package names and repo setup may need manual changes.

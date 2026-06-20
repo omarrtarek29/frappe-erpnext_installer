@@ -57,6 +57,8 @@ Environment Variables (can be set in config file):
   MYSQL_ROOT_PASS     MariaDB root password
   INSTALL_ERPNEXT     Install ERPNext (yes/no)
   SSL_EMAIL           Email for SSL certificate notifications
+  PYTHON_VER          Python version override (default: 3.11 for v15, 3.14 for v16)
+  NODE_VER            Node.js version override (default: 24)
 
 EOF
 }
@@ -106,9 +108,9 @@ main() {
 	fi
 
 	install_system_packages
+	ensure_bench_global
 	configure_mariadb
 	install_bench_and_site
-	ensure_bench_global
 	
 	if [ "$non_interactive" = "false" ] && [ -z "${INSTALL_ERPNEXT:-}" ]; then
 		ask_install_erpnext
@@ -145,14 +147,13 @@ validate_config() {
 	INSTALL_ERPNEXT="${INSTALL_ERPNEXT:-yes}"
 
 	if [ "$FRAPPE_VER" = "15" ]; then
-		PYTHON_VER="3.11"
+		PYTHON_VER="${PYTHON_VER:-3.11}"
 		FRAPPE_BRANCH="version-15"
-		NODE_VER="20"
 	else
-		PYTHON_VER="3.12"
+		PYTHON_VER="${PYTHON_VER:-3.14}"
 		FRAPPE_BRANCH="version-16"
-		NODE_VER="20"
 	fi
+	NODE_VER="${NODE_VER:-24}"
 
 	FRAPPE_HOME="/home/$FRAPPE_USER"
 	BENCH_PATH="$FRAPPE_HOME/$BENCH_NAME"

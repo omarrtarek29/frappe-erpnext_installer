@@ -19,5 +19,14 @@ SSL_EMAIL=""                 # Email for SSL certificate renewal notifications
 # MariaDB (leave empty to configure interactively)
 MYSQL_ROOT_PASS=""           # MariaDB root password
 
-# Advanced
+# Advanced - Version overrides (defaults are recommended)
+# PYTHON_VER=""              # Python version (default: 3.11 for v15, 3.14 for v16)
+# NODE_VER=""                # Node.js version (default: 24)
 FORCE_SITE="no"              # Force recreate site if exists (yes/no)
+
+# Notes:
+# - Python is installed via uv (not system packages)
+# - Node.js is installed via nvm (not apt/NodeSource)
+# - MariaDB repo is added automatically if system version is too old
+# - wkhtmltopdf with patched-qt is downloaded automatically
+# - Supports Ubuntu 20.04, 22.04, and 24.04

@@ -38,14 +38,13 @@ collect_user_input() {
 	read -p "Enter domain (leave empty for dev mode): " DOMAIN
 
 	if [ "$FRAPPE_VER" = "15" ]; then
-		PYTHON_VER="3.11"
+		PYTHON_VER="${PYTHON_VER:-3.11}"
 		FRAPPE_BRANCH="version-15"
-		NODE_VER="20"
 	else
-		PYTHON_VER="3.12"
+		PYTHON_VER="${PYTHON_VER:-3.14}"
 		FRAPPE_BRANCH="version-16"
-		NODE_VER="20"
 	fi
+	NODE_VER="${NODE_VER:-24}"
 
 	FRAPPE_HOME="/home/$FRAPPE_USER"
 	BENCH_PATH="$FRAPPE_HOME/$BENCH_NAME"
@@ -58,7 +57,7 @@ collect_user_input() {
 	echo "  User: $FRAPPE_USER"
 	echo "  Bench Path: $BENCH_PATH"
 	echo "  Site: $SITE_NAME"
-	[ -n "$DOMAIN" ] && echo "  Domain: $DOMAIN" || echo "  Mode: Development"
+	[ -n "$DOMAIN" ] && echo "  Domain: $DOMAIN" || echo "  Environment: Development"
 }
 
 ask_install_erpnext() {
