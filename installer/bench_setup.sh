@@ -130,7 +130,8 @@ install_apps_with_temp_redis() {
 
 	log_info "Stopping temporary bench..."
 	stop_bench_processes "$BENCH_PATH" "$FRAPPE_USER"
-	sleep 2
+	reset_bench_redis_runtime "$BENCH_PATH" "$BENCH_NAME"
+	ensure_bench_ports_free "$BENCH_PATH" || exit 1
 
 	log_success "ERPNext installed"
 }

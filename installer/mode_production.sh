@@ -1,22 +1,14 @@
 #!/usr/bin/env bash
 
-_reload_supervisor() {
-	log_info "Reloading supervisor..."
-	sudo systemctl enable supervisor 2>/dev/null || true
-	sudo systemctl restart supervisor
-	sleep 3
-	sudo supervisorctl reread
-	sudo supervisorctl update
-	sudo supervisorctl restart all 2>/dev/null || true
-}
-
 _recover_supervisor() {
-	log_warn "Supervisor has no bench processes - regenerating config..."
+	log_warn "Supervisor services unhealthy - regenerating config..."
+	prepare_bench_for_services
 	_run_bench_cmd "bench setup supervisor --yes"
+	setup_bench_redis_configs
 	restore_other_bench_symlinks
 	remove_duplicate_bench_symlinks
 	ensure_bench_service_links
-	_reload_supervisor
+	start_bench_supervisor
 }
 
 setup_production() {
@@ -36,8 +28,6 @@ setup_production() {
 		fi
 	fi
 
-	# bench setup production creates ${BENCH_NAME}.conf symlinks itself.
-	# Fix any cross-bench symlink damage from prior installs, then clean wrong names for this bench only.
 	restore_other_bench_symlinks
 	remove_duplicate_bench_symlinks
 	sudo rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
@@ -53,19 +43,33 @@ setup_production() {
 	restore_other_bench_symlinks
 	remove_duplicate_bench_symlinks
 	ensure_bench_service_links
-	_reload_supervisor
+
+	prepare_bench_for_services
+	setup_bench_redis_configs
+	start_bench_supervisor || {
+		log_warn "Supervisor start failed - retrying recovery..."
+		_recover_supervisor || {
+			log_error "Supervisor services failed to start"
+			sudo supervisorctl status 2>/dev/null || true
+			exit 1
+		}
+	}
 
 	if ! wait_for_supervisor_services 30; then
-		_recover_supervisor
+		log_warn "Supervisor services not healthy - retrying..."
+		restart_bench_supervisor
 		wait_for_supervisor_services 90 || {
-			log_warn "Supervisor may not be fully ready"
+			log_error "Supervisor services failed to start"
 			sudo supervisorctl status 2>/dev/null || true
+			exit 1
 		}
 	fi
 
 	sudo nginx -t && sudo systemctl reload nginx
 
-	wait_for_web_ready "http://localhost:80" 60 || log_warn "Web server may not be responding on port 80"
+	local web_host="${DOMAIN:-$SITE_NAME}"
+	wait_for_web_ready "http://127.0.0.1" 60 "$web_host" || \
+		log_warn "Web server may not be responding for $web_host"
 
 	setup_ssl_certificate
 

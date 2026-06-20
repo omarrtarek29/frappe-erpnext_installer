@@ -381,13 +381,17 @@ wait_for_supervisor_services() {
 wait_for_web_ready() {
 	local url="${1:-http://localhost:8000}"
 	local max_wait="${2:-60}"
+	local host_header="${3:-}"
 	local elapsed=0
+	local curl_args=(-s -o /dev/null -w "%{http_code}")
 
-	log_info "Waiting for web server at $url..."
+	log_info "Waiting for web server at $url${host_header:+ (Host: $host_header)}..."
+
+	[ -n "$host_header" ] && curl_args+=(-H "Host: $host_header")
 
 	while [ $elapsed -lt $max_wait ]; do
-		if curl -s -o /dev/null -w "%{http_code}" "$url" 2>/dev/null | grep -qE '^(200|302|301)$'; then
-			log_success "Web server responding at $url"
+		if curl "${curl_args[@]}" "$url" 2>/dev/null | grep -qE '^(200|302|301)$'; then
+			log_success "Web server responding at $url${host_header:+ (Host: $host_header)}"
 			return 0
 		fi
 		sleep 2
@@ -400,21 +404,174 @@ wait_for_web_ready() {
 
 stop_bench_processes() {
 	local bench_path="$1"
-	local user="$2"
+	local user="${2:-$FRAPPE_USER}"
 
-	log_info "Stopping any existing bench processes..."
-	pkill -f "bench start" 2>/dev/null || true
-	pkill -f "bench serve" 2>/dev/null || true
-	pkill -f "honcho" 2>/dev/null || true
+	log_info "Stopping any existing bench processes for $bench_path..."
+
+	run_as_frappe_user "$user" "cd '$bench_path' && bench stop 2>/dev/null" || true
+
+	pkill -u "$user" -f "bench start" 2>/dev/null || true
+	pkill -u "$user" -f "bench serve" 2>/dev/null || true
+	pkill -u "$user" -f "honcho" 2>/dev/null || true
+	pkill -u "$user" -f "$bench_path/config/redis_queue.conf" 2>/dev/null || true
+	pkill -u "$user" -f "$bench_path/config/redis_cache.conf" 2>/dev/null || true
+	pkill -u "$user" -f "$bench_path.*socketio" 2>/dev/null || true
+	pkill -u "$user" -f "$bench_path/env/bin/python" 2>/dev/null || true
 
 	local pids
-	pids=$(pgrep -f "$bench_path" 2>/dev/null || true)
+	pids=$(pgrep -u "$user" -f "$bench_path" 2>/dev/null || true)
 	if [ -n "$pids" ]; then
 		log_info "Killing bench-related processes: $pids"
 		kill $pids 2>/dev/null || true
 		sleep 2
 		kill -9 $pids 2>/dev/null || true
 	fi
+
+	_clear_bench_redis_state "$bench_path"
+	free_bench_ports "$bench_path"
+	sleep 1
+}
+
+_clear_bench_redis_state() {
+	local bench_path="$1"
+	local pids_dir="$bench_path/config/pids"
+
+	run_as_frappe_user "$FRAPPE_USER" "mkdir -p '$pids_dir'" 2>/dev/null || true
+	rm -f "$pids_dir"/* 2>/dev/null || true
+	sudo rm -f "$pids_dir"/* 2>/dev/null || true
+}
+
+reset_bench_redis_runtime() {
+	local bench_path="$1"
+	local bench_name="${2:-$BENCH_NAME}"
+	local user="${3:-$FRAPPE_USER}"
+	local queue_port cache_port
+
+	queue_port=$(get_redis_queue_port "$bench_path")
+	cache_port=$(get_redis_cache_port "$bench_path")
+
+	log_info "Resetting Redis runtime for $bench_name..."
+
+	sudo supervisorctl stop "${bench_name}-redis:" 2>/dev/null || true
+
+	pkill -u "$user" -f "$bench_path/config/redis_queue.conf" 2>/dev/null || true
+	pkill -u "$user" -f "$bench_path/config/redis_cache.conf" 2>/dev/null || true
+	pkill -u "$user" -f "redis-server 127.0.0.1:${queue_port}" 2>/dev/null || true
+	pkill -u "$user" -f "redis-server 127.0.0.1:${cache_port}" 2>/dev/null || true
+
+	free_port "$queue_port"
+	free_port "$cache_port"
+	sleep 1
+
+	_clear_bench_redis_state "$bench_path"
+	sudo chown -R "$user:$user" "$bench_path/config/pids" "$bench_path/config" "$bench_path/logs" 2>/dev/null || true
+}
+
+setup_bench_redis_configs() {
+	local bench_path="${1:-$BENCH_PATH}"
+
+	log_info "Regenerating Redis configuration..."
+	run_as_frappe_user "$FRAPPE_USER" "cd '$bench_path' && bench setup redis"
+	configure_bench_redis "$bench_path"
+}
+
+port_in_use() {
+	local port="$1"
+	[ -n "$port" ] || return 1
+	ss -tlnH "sport = :$port" 2>/dev/null | grep -q .
+}
+
+_bench_ports_available() {
+	local bench_path="$1"
+	local web_port socketio_port queue_port cache_port file_port
+	local blocked=""
+
+	web_port=$(get_webserver_port "$bench_path")
+	socketio_port=$(get_socketio_port "$bench_path")
+	queue_port=$(get_redis_queue_port "$bench_path")
+	cache_port=$(get_redis_cache_port "$bench_path")
+	file_port=$(grep -oP '"file_watcher_port":\s*\K[0-9]+' "$bench_path/sites/common_site_config.json" 2>/dev/null || echo "")
+
+	for port in "$web_port" "$socketio_port" "$queue_port" "$cache_port" "$file_port"; do
+		if port_in_use "$port"; then
+			blocked="${blocked:+$blocked, }$port"
+		fi
+	done
+
+	if [ -n "$blocked" ]; then
+		log_warn "Ports still in use: $blocked"
+		return 1
+	fi
+	return 0
+}
+
+ensure_bench_ports_free() {
+	local bench_path="$1"
+	local attempt
+
+	for attempt in 1 2 3 4 5; do
+		free_bench_ports "$bench_path"
+		_clear_bench_redis_state "$bench_path"
+		if _bench_ports_available "$bench_path"; then
+			log_success "Bench ports are free"
+			return 0
+		fi
+		log_warn "Retrying port cleanup ($attempt/5)..."
+		stop_bench_processes "$bench_path" "$FRAPPE_USER"
+		sleep 2
+	done
+
+	log_error "Could not free all bench ports for $bench_path"
+	return 1
+}
+
+prepare_bench_for_services() {
+	local bench_path="${1:-$BENCH_PATH}"
+	local bench_name="${2:-$BENCH_NAME}"
+
+	log_info "Preparing $bench_name for supervisor services..."
+	stop_supervisor_bench "$bench_name"
+	stop_bench_processes "$bench_path" "$FRAPPE_USER"
+	reset_bench_redis_runtime "$bench_path" "$bench_name"
+	ensure_bench_ports_free "$bench_path"
+	prepare_bench_logs
+}
+
+start_bench_supervisor() {
+	local bench_name="${1:-$BENCH_NAME}"
+	local bench_path="${2:-$BENCH_PATH}"
+
+	log_info "Starting supervisor services for $bench_name (redis first)..."
+
+	sudo supervisorctl reread
+	sudo supervisorctl update
+
+	reset_bench_redis_runtime "$bench_path" "$bench_name"
+
+	sudo supervisorctl start "${bench_name}-redis:" 2>/dev/null || \
+		sudo supervisorctl restart "${bench_name}-redis:" 2>/dev/null || true
+
+	if ! wait_for_bench_redis "$bench_path" 30; then
+		log_warn "Redis not ready - resetting and retrying..."
+		reset_bench_redis_runtime "$bench_path" "$bench_name"
+		sudo supervisorctl restart "${bench_name}-redis:" 2>/dev/null || true
+		wait_for_bench_redis "$bench_path" 30 || return 1
+	fi
+
+	sudo supervisorctl start "${bench_name}-web:" 2>/dev/null || \
+		sudo supervisorctl restart "${bench_name}-web:" 2>/dev/null || true
+	sudo supervisorctl start "${bench_name}-workers:" 2>/dev/null || \
+		sudo supervisorctl restart "${bench_name}-workers:" 2>/dev/null || true
+	sleep 2
+}
+
+restart_bench_supervisor() {
+	local bench_name="${1:-$BENCH_NAME}"
+	local bench_path="${2:-$BENCH_PATH}"
+
+	log_info "Restarting supervisor groups for $bench_name..."
+	setup_bench_redis_configs "$bench_path"
+	start_bench_supervisor "$bench_name" "$bench_path"
 }
 
 free_port() {
@@ -503,9 +660,10 @@ get_redis_cache_port() {
 }
 
 configure_bench_redis() {
-	local queue_conf="$BENCH_PATH/config/redis_queue.conf"
-	local cache_conf="$BENCH_PATH/config/redis_cache.conf"
-	local pids_dir="$BENCH_PATH/config/pids"
+	local bench_path="${1:-$BENCH_PATH}"
+	local queue_conf="$bench_path/config/redis_queue.conf"
+	local cache_conf="$bench_path/config/redis_cache.conf"
+	local pids_dir="$bench_path/config/pids"
 
 	run_as_frappe_user "$FRAPPE_USER" "mkdir -p '$pids_dir'"
 
