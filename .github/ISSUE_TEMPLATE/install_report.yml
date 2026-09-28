@@ -1,0 +1,59 @@
+name: Install report
+description: What happened when you ran the installer
+title: "[Install] "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Tell us what you were trying to deploy. Remove passwords, domains you do not want public, and anything from `site_config.json`.
+  - type: dropdown
+    id: frappe_version
+    attributes:
+      label: Frappe version
+      options:
+        - "15"
+        - "16"
+    validations:
+      required: true
+  - type: input
+    id: ubuntu
+    attributes:
+      label: Ubuntu version
+      placeholder: "24.04"
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Mode
+      options:
+        - Development (no domain)
+        - Production (domain and Nginx)
+        - Non-interactive config file
+    validations:
+      required: true
+  - type: textarea
+    id: goal
+    attributes:
+      label: What were you setting up?
+      description: For example a local app-dev bench, a staging site, or a production ERPNext server.
+    validations:
+      required: true
+  - type: dropdown
+    id: result
+    attributes:
+      label: Result
+      options:
+        - It worked
+        - It failed
+        - It worked, with a problem afterwards
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: What happened?
+      description: Paste the first error and the command you ran. Remove secrets.
+    validations:
+      required: true

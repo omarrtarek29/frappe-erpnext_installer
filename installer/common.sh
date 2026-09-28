@@ -666,15 +666,18 @@ configure_bench_redis() {
 	local pids_dir="$bench_path/config/pids"
 
 	run_as_frappe_user "$FRAPPE_USER" "mkdir -p '$pids_dir'"
+	_disable_redis_rdb_snapshot "$queue_conf"
+	_disable_redis_rdb_snapshot "$cache_conf"
+}
 
-	if [ -f "$queue_conf" ] && ! grep -qE '^save\s+""' "$queue_conf"; then
-		log_info "Disabling RDB snapshots on bench queue Redis..."
-		echo 'save ""' >> "$queue_conf"
+_disable_redis_rdb_snapshot() {
+	local conf="$1"
+	[ -f "$conf" ] || return 0
+	if grep -qE '^save[[:space:]]+""' "$conf" 2>/dev/null; then
+		return 0
 	fi
-
-	if [ -f "$cache_conf" ] && ! grep -qE '^save\s+""' "$cache_conf"; then
-		echo 'save ""' >> "$cache_conf"
-	fi
+	log_info "Disabling RDB snapshots in $conf"
+	sudo -n -u "$FRAPPE_USER" -H bash -c 'grep -qE "^save[[:space:]]+\"\"" "$1" || printf "%s\n" "save \"\"" >> "$1"' bash "$conf"
 }
 
 prepare_bench_redis_runtime() {

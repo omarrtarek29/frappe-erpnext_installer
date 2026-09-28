@@ -65,6 +65,7 @@ setup_production() {
 		}
 	fi
 
+	ensure_nginx_main_log_format
 	sudo nginx -t && sudo systemctl reload nginx
 
 	local web_host="${DOMAIN:-$SITE_NAME}"
@@ -88,8 +89,39 @@ _run_bench_cmd() {
 	"
 }
 
+ensure_nginx_main_log_format() {
+	if sudo grep -qE '^[[:space:]]*log_format[[:space:]]+main[[:space:]]' /etc/nginx/nginx.conf; then
+		return 0
+	fi
+
+	log_info "Adding nginx log_format main so the bench config can load"
+	local snippet
+	snippet="$(mktemp)"
+	cat > "$snippet" <<'EOF'
+	log_format main '$remote_addr - $remote_user [$time_local] "$request" '
+	                '$status $body_bytes_sent "$http_referer" '
+	                '"$http_user_agent" "$http_x_forwarded_for"';
+EOF
+	sudo python3 - "$snippet" <<'PY'
+import pathlib, sys
+snippet = pathlib.Path(sys.argv[1]).read_text()
+conf_path = pathlib.Path("/etc/nginx/nginx.conf")
+conf = conf_path.read_text()
+needle = "access_log /var/log/nginx/access.log;"
+if needle not in conf:
+    raise SystemExit("nginx.conf has no access_log line to anchor log_format main")
+conf_path.write_text(conf.replace(needle, snippet.rstrip() + "\n\n\t" + needle, 1))
+PY
+	rm -f "$snippet"
+}
+
 setup_ssl_certificate() {
 	log_info "Setting up SSL certificate..."
+	ensure_nginx_main_log_format
+	if ! sudo nginx -t; then
+		log_warn "nginx -t failed, so Certbot cannot install a certificate"
+		return 1
+	fi
 
 	if ! command_exists certbot; then
 		sudo snap install core 2>/dev/null || true
@@ -105,15 +137,15 @@ setup_ssl_certificate() {
 		return 1
 	fi
 
-	local email_flag=""
+	local certbot_status=0
 	if [ -n "${SSL_EMAIL:-}" ]; then
-		email_flag="-m $SSL_EMAIL"
+		sudo certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos -m "$SSL_EMAIL" || certbot_status=$?
 	else
-		email_flag="--register-unsafely-without-email"
 		log_warn "No SSL_EMAIL set - certificate renewal notifications disabled"
+		sudo certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos --register-unsafely-without-email || certbot_status=$?
 	fi
 
-	if sudo certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos $email_flag 2>/dev/null; then
+	if [ "$certbot_status" -eq 0 ]; then
 		log_success "SSL certificate installed for $DOMAIN"
 		sudo systemctl reload nginx 2>/dev/null || true
 	else

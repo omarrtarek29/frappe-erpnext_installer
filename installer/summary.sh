@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 
 print_summary() {
-	SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "localhost")
+	SERVER_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+	SERVER_IP="${SERVER_IP:-localhost}"
 	local bench_name
 	bench_name=$(basename "$BENCH_PATH")
 
@@ -30,6 +31,9 @@ print_summary() {
 	echo "  Login:"
 	echo "    Username : Administrator"
 	echo "    Password : (as configured)"
+	echo ""
+	echo "  Feedback:"
+	echo "    https://github.com/omarrtarek29/frappe-erpnext_installer/issues"
 	echo ""
 	echo "==========================================="
 	echo ""

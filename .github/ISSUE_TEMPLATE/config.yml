@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Frappe Forum
+    url: https://discuss.frappe.io/
+    about: Questions about Frappe or ERPNext itself belong on the forum. Installer bugs belong here.

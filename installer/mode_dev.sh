@@ -22,5 +22,8 @@ setup_dev_mode() {
 	echo "    cd ~/$BENCH_NAME"
 	echo "    bench serve --port $web_port"
 	echo ""
-	echo "  Then open: http://$(hostname -I 2>/dev/null | awk '{print $1}'):$web_port"
+	local server_ip
+	server_ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+	server_ip="${server_ip:-localhost}"
+	echo "  Then open: http://${server_ip}:$web_port"
 }

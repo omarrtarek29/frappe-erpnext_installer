@@ -26,6 +26,7 @@ acquire_lock() {
 }
 
 source "$INSTALLER_DIR/common.sh"
+source "$INSTALLER_DIR/validators.sh"
 source "$INSTALLER_DIR/system_checks.sh"
 source "$INSTALLER_DIR/user_input.sh"
 source "$INSTALLER_DIR/system_packages.sh"
@@ -40,12 +41,12 @@ show_usage() {
 	cat <<EOF
 Usage: $0 [OPTIONS]
 
-Frappe/ERPNext Installer for Ubuntu 20.04, 22.04, 24.04
+Frappe/ERPNext Installer for Ubuntu 20.04, 22.04, 24.04, and 26.04
 
 Options:
   -h, --help          Show this help message
   -c, --config FILE   Load configuration from file
-  -y, --yes           Non-interactive mode (requires --config)
+  -y, --yes           Non-interactive mode (requires --config and MYSQL_ROOT_PASS)
 
 Environment Variables (can be set in config file):
   FRAPPE_VER          Frappe version (15 or 16)
@@ -89,6 +90,8 @@ main() {
 		esac
 	done
 
+	export NON_INTERACTIVE="$non_interactive"
+
 	acquire_lock
 	trap cleanup EXIT
 
@@ -99,7 +102,11 @@ main() {
 		validate_config
 	else
 		collect_user_input
+		ask_install_erpnext
 	fi
+
+	apply_input_validation || exit 1
+	assert_os_for_frappe_version
 
 	if [ "${RUNNING_AS_ROOT:-false}" = "true" ]; then
 		keep_sudo_alive_root
@@ -111,11 +118,6 @@ main() {
 	ensure_bench_global
 	configure_mariadb
 	install_bench_and_site
-	
-	if [ "$non_interactive" = "false" ] && [ -z "${INSTALL_ERPNEXT:-}" ]; then
-		ask_install_erpnext
-	fi
-
 	install_apps_with_temp_redis
 
 	if [ -n "$DOMAIN" ]; then

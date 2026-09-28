@@ -22,17 +22,23 @@ install_system_packages() {
 		log_success "User $FRAPPE_USER created"
 	fi
 
-	echo "$FRAPPE_USER ALL=(ALL) NOPASSWD: ALL" | sudo tee "/etc/sudoers.d/$FRAPPE_USER" >/dev/null
-	sudo chmod 440 "/etc/sudoers.d/$FRAPPE_USER"
+	_configure_frappe_sudoers
 
-	sudo chmod -R o+rx "/home/$FRAPPE_USER"
-	log_success "Home directory permissions set for nginx"
+	# Nginx only needs to traverse the home directory. Recursive world-read
+	# would expose SSH keys and site config to every local user.
+	sudo chmod o+x "/home/$FRAPPE_USER"
+	log_success "Home directory traversal set for nginx"
 
 	log_info "Installing system dependencies..."
 	safe_apt_install git curl wget software-properties-common
+	local ncurses_packages="libncurses5-dev libncursesw5-dev"
+	. /etc/os-release 2>/dev/null || true
+	if [ "${VERSION_ID:-}" = "26.04" ]; then
+		ncurses_packages="libncurses-dev"
+	fi
 	safe_apt_install build-essential libffi-dev libssl-dev zlib1g-dev \
-		libbz2-dev libreadline-dev libsqlite3-dev libncurses5-dev \
-		libncursesw5-dev xz-utils tk-dev liblzma-dev
+		libbz2-dev libreadline-dev libsqlite3-dev $ncurses_packages \
+		xz-utils tk-dev liblzma-dev
 
 	if apt-cache show libmariadb-dev &>/dev/null; then
 		safe_apt_install libmariadb-dev
@@ -51,8 +57,28 @@ install_system_packages() {
 	_install_wkhtmltopdf
 	_install_redis
 	_install_mariadb
-	safe_apt_install supervisor nginx ansible
+	safe_apt_install supervisor nginx ansible cron fail2ban
 	sudo systemctl enable supervisor nginx 2>/dev/null || true
+}
+
+_configure_frappe_sudoers() {
+	local file="/etc/sudoers.d/$FRAPPE_USER"
+	local tmp
+	tmp="$(mktemp)"
+	cat > "$tmp" <<EOF
+# Service management for bench. Full NOPASSWD root is intentionally not granted.
+$FRAPPE_USER ALL=(ALL) NOPASSWD: /usr/bin/supervisorctl, /usr/sbin/nginx, /usr/bin/certbot, /bin/systemctl start nginx, /bin/systemctl stop nginx, /bin/systemctl restart nginx, /bin/systemctl reload nginx, /bin/systemctl start supervisor, /bin/systemctl stop supervisor, /bin/systemctl restart supervisor, /bin/systemctl reload supervisor, /usr/sbin/service nginx *, /usr/sbin/service supervisor *
+EOF
+	sudo cp "$tmp" "$file"
+	sudo chown root:root "$file"
+	sudo chmod 440 "$file"
+	rm -f "$tmp"
+	if ! sudo visudo -cf "$file"; then
+		sudo rm -f "$file"
+		log_error "Refusing to keep an invalid sudoers file for $FRAPPE_USER"
+		exit 1
+	fi
+	log_success "Limited sudoers rule installed for $FRAPPE_USER"
 }
 
 _install_uv() {
@@ -126,7 +152,7 @@ _install_nodejs() {
 	log_info "Installing nvm for $FRAPPE_USER..."
 	sudo -u "$FRAPPE_USER" -H bash -c '
 		export HOME="/home/'"$FRAPPE_USER"'"
-		curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+		curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
 	' || {
 		log_error "Failed to install nvm"
 		exit 1
@@ -279,28 +305,17 @@ _install_redis() {
 _install_mariadb() {
 	log_info "Installing MariaDB..."
 
-	local required_version=""
-	if [ "$FRAPPE_VER" = "15" ]; then
-		required_version="10.6"
-	else
-		required_version="11.4"
-	fi
+	local required_version
+	required_version="$(_required_mariadb_version)"
 
 	local need_install=false
+	local current_ver=""
 	if ! command_exists mariadb; then
 		need_install=true
 	else
-		local current_ver
-		current_ver=$(mariadb --version 2>/dev/null | grep -oP '\d+\.\d+' | head -1 || echo "0")
-		local current_major current_minor req_major req_minor
-		current_major=$(echo "$current_ver" | cut -d. -f1)
-		current_minor=$(echo "$current_ver" | cut -d. -f2)
-		req_major=$(echo "$required_version" | cut -d. -f1)
-		req_minor=$(echo "$required_version" | cut -d. -f2)
-
-		if [ "$current_major" -lt "$req_major" ] 2>/dev/null || \
-		   { [ "$current_major" -eq "$req_major" ] && [ "$current_minor" -lt "$req_minor" ]; } 2>/dev/null; then
-			log_info "MariaDB $current_ver found, but $required_version+ required"
+		current_ver="$(_mariadb_server_version)"
+		if [ -z "$current_ver" ] || version_lt "$current_ver" "$required_version"; then
+			log_info "MariaDB ${current_ver:-unknown} found, but $required_version+ is required for Frappe v$FRAPPE_VER"
 			need_install=true
 		else
 			log_success "MariaDB $current_ver meets requirement ($required_version+)"
@@ -308,14 +323,49 @@ _install_mariadb() {
 	fi
 
 	if [ "$need_install" = true ]; then
-		_add_mariadb_repo "$required_version" || {
-			log_warn "MariaDB repo setup failed, using distro package"
-		}
+		if _distro_mariadb_is_sufficient "$required_version"; then
+			log_info "Installing MariaDB from Ubuntu packages"
+		else
+			_add_mariadb_repo "$required_version" || {
+				log_warn "MariaDB repo setup failed, using the distro package"
+			}
+		fi
 		safe_apt_install mariadb-server mariadb-client
 	fi
 
 	sudo systemctl enable mariadb 2>/dev/null || true
 	sudo systemctl start mariadb 2>/dev/null || true
+
+	current_ver="$(_mariadb_server_version)"
+	if [ -z "$current_ver" ] || version_lt "$current_ver" "$required_version"; then
+		log_error "MariaDB ${current_ver:-not installed} is older than $required_version required for Frappe v$FRAPPE_VER"
+		exit 1
+	fi
+	log_success "MariaDB $current_ver is installed"
+}
+
+_distro_mariadb_is_sufficient() {
+	local required="$1"
+	local shipped
+	. /etc/os-release 2>/dev/null || true
+	shipped="$(distro_mariadb_version "${VERSION_ID:-}")"
+	[ -n "$shipped" ] || return 1
+	version_lt "$shipped" "$required" && return 1
+	log_info "Ubuntu ${VERSION_ID} ships MariaDB $shipped, which meets $required+."
+	return 0
+}
+
+_required_mariadb_version() {
+	# Matches current Frappe install docs: v15 needs 10.6+, v16 needs 11.8.
+	if [ "$FRAPPE_VER" = "16" ]; then
+		echo "11.8"
+	else
+		echo "10.6"
+	fi
+}
+
+_mariadb_server_version() {
+	mariadb_version_from_text "$(mariadb --version 2>/dev/null || true)"
 }
 
 _add_mariadb_repo() {
@@ -330,20 +380,35 @@ _add_mariadb_repo() {
 			20.04) codename="focal" ;;
 			22.04) codename="jammy" ;;
 			24.04) codename="noble" ;;
+			26.04) log_info "Ubuntu 26.04 uses its own MariaDB packages"; return 1 ;;
 			*) log_warn "Unknown Ubuntu version"; return 1 ;;
 		esac
 	fi
 
 	sudo apt-get install -y apt-transport-https curl gnupg 2>/dev/null || true
 
+	local keyring="/etc/apt/keyrings/mariadb.gpg"
+	local key_tmp="/tmp/mariadb-release-key.pgp"
 	sudo mkdir -p /etc/apt/keyrings
-	curl -fsSL "https://mariadb.org/mariadb_release_signing_key.pgp" | \
-		sudo gpg --dearmor -o /etc/apt/keyrings/mariadb.gpg 2>/dev/null || {
+	curl -fsSL "https://mariadb.org/mariadb_release_signing_key.pgp" -o "$key_tmp" || {
+		log_warn "Failed to download MariaDB GPG key"
+		return 1
+	}
+	sudo rm -f "$keyring"
+	sudo gpg --batch --yes --dearmor -o "$keyring" "$key_tmp" || {
 		log_warn "Failed to add MariaDB GPG key"
+		rm -f "$key_tmp"
+		return 1
+	}
+	rm -f "$key_tmp"
+
+	local repo_base
+	repo_base="$(_mariadb_repo_base "$version" "$codename")" || {
+		log_warn "No MariaDB $version repository for Ubuntu $codename"
 		return 1
 	}
 
-	local repo_line="deb [signed-by=/etc/apt/keyrings/mariadb.gpg] https://dlm.mariadb.com/repo/mariadb-server/$version/repo/ubuntu $codename main"
+	local repo_line="deb [signed-by=/etc/apt/keyrings/mariadb.gpg] ${repo_base} ${codename} main"
 	echo "$repo_line" | sudo tee /etc/apt/sources.list.d/mariadb.list > /dev/null
 
 	sudo apt-get update -y || {
@@ -353,4 +418,31 @@ _add_mariadb_repo() {
 	}
 
 	log_success "MariaDB $version repository added"
+}
+
+_mariadb_repo_base() {
+	local version="$1"
+	local codename="$2"
+	local live="https://dlm.mariadb.com/repo/mariadb-server/${version}/repo/ubuntu"
+	local patch archived
+
+	if curl -fsI "${live}/dists/${codename}/Release" >/dev/null; then
+		printf '%s\n' "$live"
+		return 0
+	fi
+
+	# The live 11.8 mirror has no Ubuntu 20.04 (focal) suite. The archive still does.
+	for patch in 11.8.8 11.8.7 11.8.6 11.8.5 11.8.3; do
+		case "$patch" in
+			"${version}".*) ;;
+			*) continue ;;
+		esac
+		archived="https://archive.mariadb.org/mariadb-${patch}/repo/ubuntu"
+		if curl -fsI "${archived}/dists/${codename}/Release" >/dev/null; then
+			log_info "Using MariaDB archive $patch for Ubuntu $codename" >&2
+			printf '%s\n' "$archived"
+			return 0
+		fi
+	done
+	return 1
 }

@@ -77,3 +77,50 @@ ask_install_erpnext() {
 		;;
 	esac
 }
+
+apply_input_validation() {
+	local errors=0
+
+	if ! validate_linux_user "${FRAPPE_USER:-}"; then
+		log_error "FRAPPE_USER must be a lowercase Linux username (letters, digits, underscore, hyphen)"
+		errors=$((errors + 1))
+	fi
+	if ! validate_bench_name "${BENCH_NAME:-}"; then
+		log_error "BENCH_NAME may only contain letters, digits, dots, underscores, and hyphens"
+		errors=$((errors + 1))
+	fi
+	if ! validate_site_name "${SITE_NAME:-}"; then
+		log_error "SITE_NAME must be a hostname such as site.local or erp.example.com"
+		errors=$((errors + 1))
+	fi
+	if ! validate_optional_domain "${DOMAIN:-}"; then
+		log_error "DOMAIN must be a hostname, or empty for development mode"
+		errors=$((errors + 1))
+	fi
+	if ! validate_password_value "${ADMIN_PASS:-}"; then
+		log_error "ADMIN_PASS cannot be empty or contain a newline"
+		errors=$((errors + 1))
+	fi
+	if ! validate_choice "${INSTALL_ERPNEXT:-yes}"; then
+		log_error "INSTALL_ERPNEXT must be yes or no"
+		errors=$((errors + 1))
+	fi
+	if ! validate_choice "${FORCE_SITE:-no}"; then
+		log_error "FORCE_SITE must be yes or no"
+		errors=$((errors + 1))
+	fi
+	if ! validate_optional_email "${SSL_EMAIL:-}"; then
+		log_error "SSL_EMAIL must be an email address"
+		errors=$((errors + 1))
+	fi
+	if [ -n "${MYSQL_ROOT_PASS:-}" ] && ! validate_password_value "$MYSQL_ROOT_PASS"; then
+		log_error "MYSQL_ROOT_PASS cannot contain a newline"
+		errors=$((errors + 1))
+	fi
+	if [ "${NON_INTERACTIVE:-false}" = "true" ] && [ -z "${MYSQL_ROOT_PASS:-}" ]; then
+		log_error "MYSQL_ROOT_PASS is required when using --yes"
+		errors=$((errors + 1))
+	fi
+
+	[ "$errors" -eq 0 ]
+}

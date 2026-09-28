@@ -8,7 +8,9 @@ configure_firewall() {
 
 	log_info "Configuring UFW firewall..."
 
-	sudo ufw allow 22/tcp comment 'SSH'
+	local ssh_port
+	ssh_port="$(_detect_ssh_port)"
+	sudo ufw allow "${ssh_port}/tcp" comment 'SSH'
 
 	if [ -n "$DOMAIN" ]; then
 		sudo ufw allow 80/tcp comment 'HTTP'
@@ -26,4 +28,15 @@ configure_firewall() {
 	sudo ufw --force enable
 	log_success "Firewall configured"
 	sudo ufw status verbose
+}
+
+_detect_ssh_port() {
+	local port=""
+	if command_exists sshd; then
+		port="$(sudo sshd -T 2>/dev/null | awk '/^port / { print $2; exit }')"
+	fi
+	if ! [[ "$port" =~ ^[0-9]+$ ]]; then
+		port="22"
+	fi
+	echo "$port"
 }

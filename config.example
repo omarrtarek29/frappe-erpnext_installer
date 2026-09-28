@@ -1,32 +1,34 @@
 # Frappe/ERPNext Installer Configuration
-# Copy this file and customize for non-interactive installation
+# Copy this file and customize it. The installer sources it as shell.
 # Usage: ./frappe_installer.sh -c myconfig.conf -y
+# Do not commit real passwords.
 
 # Required settings
 FRAPPE_VER="15"              # 15 or 16
-FRAPPE_USER="frappe"         # System user for Frappe
-SITE_NAME="erp.example.com"  # Your site name
-ADMIN_PASS="SecurePassword123!"  # Administrator password
+FRAPPE_USER="frappe"         # Linux user that owns the bench
+SITE_NAME="erp.example.com"  # site.local for development, or your hostname
+ADMIN_PASS="change-me"       # Administrator password. Quotes and & are fine. No newlines.
+
+# Required for non-interactive installs (-y). Leave empty to be prompted.
+MYSQL_ROOT_PASS=""
 
 # Optional settings
-BENCH_NAME="frappe-bench"    # Bench directory name (default: frappe-bench)
-INSTALL_ERPNEXT="yes"        # Install ERPNext app (yes/no)
+BENCH_NAME="frappe-bench"    # Directory name under /home/$FRAPPE_USER
+INSTALL_ERPNEXT="yes"        # yes or no
 
-# Production mode (leave empty for development)
-DOMAIN=""                    # Domain for production with nginx/SSL
-SSL_EMAIL=""                 # Email for SSL certificate renewal notifications
+# Production mode. Leave DOMAIN empty for development (bench serve).
+DOMAIN=""                    # Hostname for Nginx and Let's Encrypt
+SSL_EMAIL=""                 # Inbox for certificate expiry notices
 
-# MariaDB (leave empty to configure interactively)
-MYSQL_ROOT_PASS=""           # MariaDB root password
-
-# Advanced - Version overrides (defaults are recommended)
-# PYTHON_VER=""              # Python version (default: 3.11 for v15, 3.14 for v16)
-# NODE_VER=""                # Node.js version (default: 24)
-FORCE_SITE="no"              # Force recreate site if exists (yes/no)
+# Advanced
+# PYTHON_VER=""              # Default: 3.11 for v15, 3.14 for v16
+# NODE_VER=""                # Default: 24
+FORCE_SITE="no"              # yes recreates the site and drops its database
 
 # Notes:
-# - Python is installed via uv (not system packages)
-# - Node.js is installed via nvm (not apt/NodeSource)
-# - MariaDB repo is added automatically if system version is too old
-# - wkhtmltopdf with patched-qt is downloaded automatically
-# - Supports Ubuntu 20.04, 22.04, and 24.04
+# - Frappe v15 and v16 run on Ubuntu 20.04, 22.04, 24.04, and 26.04.
+# - v16 needs MariaDB 11.8. Ubuntu 20.04 gets it from the MariaDB archive.
+# - Ubuntu 26.04 uses the distro MariaDB 11.8 package.
+# - The root disk needs at least 8 GB free.
+# - Python comes from uv. Node.js comes from nvm.
+# - wkhtmltopdf with patched Qt is installed for PDF printing.
